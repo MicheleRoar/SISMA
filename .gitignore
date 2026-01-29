@@ -8,3 +8,23 @@ data/cache/
 *.sqlite
 *.log
 node_modules/
+
+# =========================
+# SISMA – ignored files
+# =========================
+
+# Data (never commit)
+data/
+
+# Excel temp files
+~$*.xlsx
+
+# Jupyter noise
+.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
