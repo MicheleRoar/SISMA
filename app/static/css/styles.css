@@ -1,0 +1,619 @@
+/* =========================
+   SISMA — styles.css
+   Light default + Dark optional
+   Complete set (keeps old classes)
+   ========================= */
+
+/* ===== Core constants (not theme-dependent) ===== */
+:root{
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+
+  --radius: 14px;
+  --shadow: 0 10px 30px rgba(0,0,0,.10);
+
+  --accent: #ffd400;   /* SISMA yellow */
+  --accent2:#3a93ff;   /* focus */
+  --spotify:#1DB954;
+  --danger:#d64545;
+}
+
+/* ===== Light theme (default) ===== */
+html[data-theme="light"]{
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --card: #ffffff;
+
+  --text: #0f172a;
+  --muted:#64748b;
+
+  --line: #d1d5db;
+  --line-soft:#e5e7eb;
+
+  --track: rgba(0,0,0,0.12);
+  --fill: rgba(15,23,42,0.90);
+  --thumb-bg:#ffffff;
+  --thumb-border: rgba(15,23,42,0.55);
+
+  --thead-bg:#0f172a;
+  --thead-text:#ffffff;
+
+  --hover: rgba(0,0,0,0.03);
+  --suggest-hover: rgba(0,0,0,0.04);
+}
+
+/* ===== Dark theme ===== */
+html[data-theme="dark"]{
+  --bg: #0b0d10;
+  --panel: #11151b;
+  --card: #0f1318;
+
+  --text: #e7eef7;
+  --muted:#9fb0c3;
+
+  --line: #222b35;
+  --line-soft: rgba(255,255,255,0.08);
+
+  --track: rgba(255,255,255,0.10);
+  --fill: rgba(255,255,255,0.85);
+  --thumb-bg:#ffffff;
+  --thumb-border: rgba(255,255,255,0.55);
+
+  --thead-bg:#000000;
+  --thead-text:#ffffff;
+
+  --hover: rgba(255,255,255,0.04);
+  --suggest-hover: rgba(255,255,255,0.06);
+}
+
+/* ===== Reset / base ===== */
+*{ box-sizing: border-box; }
+html, body{ height: 100%; }
+
+body{
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+}
+
+a{ color: inherit; }
+
+/* ===== Layout ===== */
+.wrap{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px 16px 60px;
+}
+
+/* Fallback old header if still used */
+.top{
+  text-align: left;
+  padding: 18px 16px 10px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.top h1{
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.2px;
+}
+.subtitle{
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+.about{
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+.about:hover{ text-decoration: underline; }
+
+/* ===== Planner-like header with tabs ===== */
+.planner-header{
+display:flex;
+align-items:center;
+justify-content:space-between;
+gap: 12px;
+
+padding: 14px 16px;
+background: var(--card);
+border: 1px solid var(--line);
+border-radius: var(--radius);
+box-shadow: var(--shadow);
+margin: 0 0 14px; /* sta dentro .wrap, quindi niente auto/max-width */
+}
+
+.brand .logo{
+  font-weight: 900;
+  letter-spacing: .08em;
+  font-size: 14px;
+}
+.brand .subtitle{
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.tabs{
+  display:flex;
+  gap: 10px;
+  align-items:center;
+}
+.tab{
+  text-decoration:none;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 800;
+  font-size: 14px;
+}
+.tab:hover{ filter: brightness(1.03); }
+.tab.active{
+  background: var(--accent);
+  color: #000;
+  border-color: transparent;
+}
+
+/* ===== Card ===== */
+.card{
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.card h2{
+  margin: 0;
+  font-size: 22px;
+}
+
+.card-head{
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.head-actions{
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.head-actions .btn{
+  padding: 10px 14px;
+  min-width: 110px;
+  width: auto;
+}
+
+/* ===== Form ===== */
+.form{
+  display: grid;
+  gap: 18px;
+}
+.row{
+  display: grid;
+  gap: 8px;
+}
+
+select, input[type="number"], input[type="text"]{
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  border-radius: 12px;
+  outline: none;
+}
+
+input::placeholder{ color: var(--muted); }
+
+select:focus, input:focus{
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 3px rgba(58,147,255,0.22);
+}
+
+/* ===== Buttons ===== */
+.btn{
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  padding: 12px 14px;
+  font-weight: 900;
+  cursor: pointer;
+  border-radius: 12px;
+  width: 100%;
+}
+.btn:hover{ filter: brightness(1.03); }
+
+.btn.secondary{
+  background: var(--panel);
+}
+
+.btn.spotify{
+  background: var(--spotify);
+  border-color: transparent;
+  color: #fff;
+}
+
+.btn:disabled,
+.btn.spotify:disabled{
+  background: var(--line-soft);
+  border-color: var(--line-soft);
+  color: var(--muted);
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* Main submit (Generate) */
+.form > .btn[type="submit"]/* keep your HTML */{
+  background: var(--accent);
+  color: #000;
+  border-color: transparent;
+}
+
+/* ===== Small actions ===== */
+.small-actions{
+  text-align: center;
+  margin-top: 6px;
+}
+.link{
+  color: var(--muted);
+  text-decoration: underline;
+  font-size: 13px;
+}
+.link:hover{ color: var(--text); }
+
+/* ===== Dual include/exclude layout ===== */
+.dual-filter{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.filter-col{
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-label{
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.filter-label.exclude{
+  color: var(--danger);
+}
+
+@media (max-width: 700px){
+  .dual-filter{ grid-template-columns: 1fr; }
+}
+
+/* ===== Suggestions dropdown ===== */
+.suggestions{
+  border: 1px solid var(--line);
+  background: var(--card);
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: 12px;
+}
+
+.suggestion-item{
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.suggestion-item:hover{
+  background: var(--suggest-hover);
+}
+.suggestion-item:last-child{ border-bottom: none; }
+
+/* ===== Chips ===== */
+.chips{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.chip{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.chip button{
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--muted);
+}
+.chip button:hover{ color: var(--text); }
+
+/* ===== Checkbox styling ===== */
+.include-track{
+  transform: scale(1.15);
+  accent-color: rgba(120,120,120,0.9);
+  cursor: pointer;
+}
+.dc{
+  margin-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.dc-left{ text-align: left; }
+.dc input[type="checkbox"]{
+  transform: translateY(1px);
+  accent-color: rgba(120,120,120,0.9);
+}
+
+/* ===== Slider blocks ===== */
+.slider-block{
+  padding: 10px 0 2px;
+}
+
+.slider-head{
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 12px;
+  font-weight: 900;
+}
+.slider-head .value{
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.slider-labels{
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0 6px;
+}
+
+.range-ticks{
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* ===== Dual-thumb range slider ===== */
+.range-wrap{
+  --track-h: 10px;
+  --thumb: 18px;
+
+  position: relative;
+  height: var(--thumb);
+  margin: 10px 0 6px;
+}
+
+/* Fake track + fill */
+.range-track,
+.range-fill{
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: var(--track-h);
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.range-track{
+  left: 0;
+  right: 0;
+  background: var(--track);
+}
+
+.range-fill{
+  left: 0;
+  width: 0%;
+  background: var(--fill);
+  z-index: 2;
+}
+
+/* Two overlapping ranges */
+.range-wrap input[type="range"]{
+  -webkit-appearance: none;
+  appearance: none;
+
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+
+  background: transparent;
+  outline: none;
+  z-index: 3;
+}
+
+/* Hide native tracks */
+.range-wrap input[type="range"]::-webkit-slider-runnable-track{
+  height: var(--track-h);
+  background: transparent;
+  border: 0;
+}
+.range-wrap input[type="range"]::-moz-range-track{
+  height: var(--track-h);
+  background: transparent;
+  border: 0;
+}
+
+/* Thumbs */
+.range-wrap input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  appearance: none;
+
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 999px;
+  background: var(--thumb-bg);
+  border: 2px solid var(--thumb-border);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.22);
+  cursor: pointer;
+
+  margin-top: calc((var(--track-h) - var(--thumb)) / 2);
+}
+
+.range-wrap input[type="range"]::-moz-range-thumb{
+  width: var(--thumb);
+  height: var(--thumb);
+  border-radius: 999px;
+  background: var(--thumb-bg);
+  border: 2px solid var(--thumb-border);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.22);
+  cursor: pointer;
+}
+
+.range-wrap input[type="range"]:focus::-webkit-slider-thumb{
+  box-shadow: 0 0 0 4px rgba(58,147,255,0.22), 0 2px 12px rgba(0,0,0,0.22);
+}
+.range-wrap input[type="range"]:focus::-moz-range-thumb{
+  box-shadow: 0 0 0 4px rgba(58,147,255,0.22), 0 2px 12px rgba(0,0,0,0.22);
+}
+
+/* ===== Advanced ===== */
+.advanced{
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+.advanced summary{
+  cursor: pointer;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+.grid-2{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 720px){
+  .grid-2{ grid-template-columns: 1fr; }
+}
+
+.minmax{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* ===== Results ===== */
+.results{
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 18px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.message{
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.criteria{
+  text-align: center;
+  margin: 10px 0 18px;
+}
+.criteria span{
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.hint{
+  margin: 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.table-wrap{
+  overflow-x: auto;
+}
+
+/* Table */
+.song-table{
+  width: 100%;
+  border-collapse: collapse;
+  background: transparent;
+}
+.song-table thead th{
+  background: var(--thead-bg);
+  color: var(--thead-text);
+  text-align: left;
+  padding: 10px 12px;
+  font-weight: 900;
+  font-size: 14px;
+}
+.song-table tbody td{
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 14px;
+}
+.song-table tbody tr:hover{
+  background: var(--hover);
+}
+.song-table tbody tr:last-child td{
+  border-bottom: none;
+}
+
+.spotify-actions{
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+/* === Container alignment: header width matches .wrap inner content === */
+:root{
+  --container: 1200px;
+  --gutter: 16px;
+  --gutter2: 32px; /* 2 * --gutter (calc moltiplicazione nons, quindi esplicito) */
+}
+
+.wrap{
+  max-width: var(--container);
+  margin: 0 auto;
+  padding: 18px var(--gutter) 60px;
+}
+
+/* Header deve allinearsi alla card (che sta dentro al gutter della wrap) */
+.planner-header{
+  width: calc(100% - var(--gutter2));
+  max-width: calc(var(--container) - var(--gutter2));
+  margin: 18px auto 14px;
+}
+
+.top{
+  width: calc(100% - var(--gutter2));
+  max-width: calc(var(--container) - var(--gutter2));
+  margin: 0 auto;
+  padding: 18px 0 10px; /* niente padding laterale: lo “simuliamo” con width */
+}
+

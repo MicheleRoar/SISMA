@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="it" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SISMA Planner</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/planner.css') }}">
+</head>
+
+<body>
+  <div class="planner-wrap">
+    <header class="planner-header">
+      <div class="brand">
+        <div class="logo">SISMA</div>
+        <div class="subtitle">Planner (pre-beta)</div>
+      </div>
+
+      <nav class="tabs">
+        <a class="tab" href="{{ url_for('discovery.index') }}">Discovery</a>
+        <a class="tab active" href="{{ url_for('planner.index') }}">Planner</a>
+      </nav>
+    </header>
+
+    <main class="planner-main">
+      <!-- Sidebar MINIMAL + powerful -->
+      <aside class="panel">
+        <h2>Planner</h2>
+
+        <div class="field">
+          <label for="slotPreset">Preset</label>
+          <select id="slotPreset">
+            {% for p in presets %}
+              <option value="{{ p }}">{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="row">
+          <div class="field" style="flex:1;">
+            <label for="slotStart">Inizio</label>
+            <input id="slotStart" type="time" value="10:00" step="1800" />
+          </div>
+          <div class="field" style="flex:1;">
+            <label for="slotEnd">Fine</label>
+            <input id="slotEnd" type="time" value="11:00" step="1800" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Giorni settimana</label>
+          <div id="weekdayToggles" class="weekday-toggles"></div>
+        </div>
+
+        <div class="field">
+          <label for="weeksCount">Numero settimane</label>
+          <select id="weeksCount">
+            <option value="1">1 settimana</option>
+            <option value="2" selected>2 settimane</option>
+            <option value="3">3 settimane</option>
+            <option value="4">4 settimane</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="slotColor">Colore</label>
+          <div class="color-row">
+            <input id="slotColor" type="color" value="#77dd77" />
+            <div class="swatch" id="swatchPreview"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="btnGenerate" class="btn primary">Genera playlist</button>
+          <button id="btnResetPlan" class="btn danger">Reset</button>
+        </div>
+
+        <div class="hint">
+          “Genera playlist” applica la regola a tutte le celle target (giorni + fascia).<br/>
+          Click su una cella colorata = mostra la playlist associata.
+        </div>
+
+        <hr/>
+
+        <!-- Viewer -->
+        <h2 style="margin-top:0;">Playlist cella</h2>
+        <div id="slotInfo" class="hint" style="margin-top:0;">
+          Clicca una cella colorata per vedere i dettagli.
+        </div>
+        <div id="slotPlaylistList" class="playlist-list"></div>
+      </aside>
+
+      <!-- Calendar -->
+      <section class="calendar">
+        <div class="calendar-top">
+          <div class="time-col-head">Ora</div>
+          <div class="days-head" id="daysHead"></div>
+        </div>
+
+        <div class="calendar-body">
+          <div class="time-col" id="timeCol"></div>
+          <div class="days-grid" id="daysGrid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/planner.js') }}"></script>
+</body>
+</html>

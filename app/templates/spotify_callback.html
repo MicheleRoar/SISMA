@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spotify Callback</title>
+</head>
+<body>
+  <p>Connecting to Spotify…</p>
+
+  <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
+  <script>
+    (async () => {
+      try {
+        await window.spotifyHandleCallback();
+        // torna alla home (puoi anche puntare a #results)
+        window.location.href = "/#results";
+      } catch (e) {
+        document.body.innerHTML = "<pre>" + (e?.message || String(e)) + "</pre>";
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SISMA — Music Discovering Tool</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+<body>
+  <main class="wrap">
+
+  <header class="planner-header">
+  <div class="brand">
+  <div class="logo">SISMA</div>
+  <div class="subtitle">Music Discovering Tool</div>
+  </div>
+
+  <nav class="tabs">
+  <a class="tab active" href="{{ url_for('discovery.index') }}">Discovery</a>
+  <a class="tab" href="{{ url_for('planner.index') }}">Planner</a>
+  </nav>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <div class="card-head">
+        <h2>Generate a Playlist</h2>
+
+        <div class="head-actions">
+          <button class="btn secondary" type="button" id="btn_reset">Reset</button>
+          <button class="btn spotify" type="button" id="btn_spotify_connect">Connect Spotify</button>
+        </div>
+      </div>
+
+      <form action="{{ url_for('discovery.generate') }}#results" method="get" class="form" id="playlist_form">
+
+        <!-- SONG QUERY -->
+        <div class="row">
+          <label><strong>Find similar to a song</strong></label>
+
+          <div class="dc dc-left" style="margin-top:0;">
+            <label>
+              <input type="checkbox" id="enable_song_mode">
+              Use a base song (similarity mode)
+            </label>
+          </div>
+
+          <input type="text" id="song_query" placeholder="Type a song or an artist..." autocomplete="off" disabled>
+          <input type="hidden" id="song_track_id" name="track_id" value="">
+
+          <div id="song_suggestions" class="suggestions" style="display:none;"></div>
+        </div>
+
+        <!-- PRESET -->
+        <div class="row">
+          <label for="preset"><strong>Preset</strong></label>
+          <select id="preset" name="preset">
+            <option value="">Custom</option>
+            {% for p in presets %}
+              <option value="{{ p }}">{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+
+        <!-- ARTISTS (include / exclude) -->
+        <div class="row">
+          <label><strong>Artist(s)</strong></label>
+
+          <div class="dual-filter">
+
+            <!-- INCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label">Include</span>
+
+              <input
+                type="text"
+                id="artist_query"
+                placeholder="Add artist…"
+                autocomplete="off"
+              >
+              <div id="artist_suggestions" class="suggestions" style="display:none;"></div>
+              <div id="artist_chips" class="chips"></div>
+
+              <input type="hidden" id="artists" name="artists"
+                     value="{{ defaults.artists if defaults.artists is defined else '' }}">
+              <input type="hidden" id="artist_weights" name="artist_weights"
+                     value="{{ defaults.artist_weights if defaults.artist_weights is defined else '' }}">
+            </div>
+
+            <!-- EXCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label exclude">Exclude</span>
+
+              <input
+                type="text"
+                id="exclude_artist_query"
+                placeholder="Exclude artist…"
+                autocomplete="off"
+              >
+              <div id="exclude_artist_suggestions" class="suggestions" style="display:none;"></div>
+              <div id="exclude_artist_chips" class="chips"></div>
+
+              <input type="hidden" id="exclude_artists" name="exclude_artists"
+                     value="{{ defaults.exclude_artists if defaults.exclude_artists is defined else '' }}">
+            </div>
+
+          </div>
+        </div>
+
+        <!-- GENRES (include / exclude) -->
+        <div class="row">
+          <label><strong>Genre(s)</strong></label>
+
+          <div class="dual-filter">
+
+            <!-- INCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label">Include</span>
+
+              <input
+                type="text"
+                id="genre_query"
+                placeholder="Add genre…"
+                autocomplete="off"
+              >
+              <div id="genre_suggestions" class="suggestions" style="display:none;"></div>
+              <div id="genre_chips" class="chips"></div>
+
+              <input type="hidden" id="genres" name="genres"
+                     value="{{ defaults.genres if defaults.genres is defined else '' }}">
+            </div>
+
+            <!-- EXCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label exclude">Exclude</span>
+
+              <input
+                type="text"
+                id="exclude_genre_query"
+                placeholder="Exclude genre…"
+                autocomplete="off"
+              >
+              <div id="exclude_genre_suggestions" class="suggestions" style="display:none;"></div>
+              <div id="exclude_genre_chips" class="chips"></div>
+
+              <input type="hidden" id="exclude_genres" name="exclude_genres"
+                     value="{{ defaults.exclude_genres if defaults.exclude_genres is defined else '' }}">
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ========================= -->
+        <!-- MAIN SLIDERS: MIN / MAX  -->
+        <!-- ========================= -->
+
+        <!-- DANCEABILITY -->
+        <div class="slider-block">
+          <div class="slider-head">
+            <div>How danceable?</div>
+            <div class="value"><span id="danceability_out"></span></div>
+          </div>
+          <div class="slider-labels"><span>Not much</span><span>Very danceable</span></div>
+
+          <div class="range-wrap" data-name="danceability">
+            <input type="range" min="0" max="100" step="1" id="danceability_min_ui"
+                   value="{{ ((defaults.danceability_min if defaults.danceability_min is defined else 0.45) * 100) | round(0) }}">
+            <input type="range" min="0" max="100" step="1" id="danceability_max_ui"
+                   value="{{ ((defaults.danceability_max if defaults.danceability_max is defined else 0.55) * 100) | round(0) }}">
+
+            <div class="range-track"></div>
+            <div class="range-fill" id="danceability_fill"></div>
+          </div>
+
+          <div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+
+          <div class="dc">
+            <input type="hidden" name="dc_danceability" id="dc_danceability"
+                   value="{{ defaults.dc_danceability if defaults.dc_danceability is defined else '0' }}">
+          </div>
+
+          <input type="hidden" name="danceability_min" id="danceability_min"
+                 value="{{ defaults.danceability_min if defaults.danceability_min is defined else '' }}">
+          <input type="hidden" name="danceability_max" id="danceability_max"
+                 value="{{ defaults.danceability_max if defaults.danceability_max is defined else '' }}">
+          <input type="hidden" name="danceability" id="danceability" value="{{ defaults.danceability }}">
+        </div>
+
+
+        <!-- ENERGY -->
+        <div class="slider-block">
+          <div class="slider-head">
+            <div>How much energy?</div>
+            <div class="value"><span id="energy_out"></span></div>
+          </div>
+          <div class="slider-labels"><span>Calm</span><span>Energetic</span></div>
+
+          <div class="range-wrap" data-name="energy">
+            <input type="range" min="0" max="100" step="1" id="energy_min_ui"
+                   value="{{ ((defaults.energy_min if defaults.energy_min is defined else 0.45) * 100) | round(0) }}">
+            <input type="range" min="0" max="100" step="1" id="energy_max_ui"
+                   value="{{ ((defaults.energy_max if defaults.energy_max is defined else 0.55) * 100) | round(0) }}">
+
+            <div class="range-track"></div>
+            <div class="range-fill" id="energy_fill"></div>
+          </div>
+
+          <div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+
+          <div class="dc">
+            <input type="hidden" name="dc_energy" id="dc_energy"
+                   value="{{ defaults.dc_energy if defaults.dc_energy is defined else '0' }}">
+          </div>
+
+          <input type="hidden" name="energy_min" id="energy_min"
+                 value="{{ defaults.energy_min if defaults.energy_min is defined else '' }}">
+          <input type="hidden" name="energy_max" id="energy_max"
+                 value="{{ defaults.energy_max if defaults.energy_max is defined else '' }}">
+          <input type="hidden" name="energy" id="energy" value="{{ defaults.energy }}">
+        </div>
+
+
+        <!-- INSTRUMENTALNESS -->
+        <div class="slider-block">
+          <div class="slider-head">
+            <div>Vocals or instrumental?</div>
+            <div class="value"><span id="instrumentalness_out"></span></div>
+          </div>
+          <div class="slider-labels"><span>Vocals</span><span>Instrumental</span></div>
+
+          <div class="range-wrap" data-name="instrumentalness">
+            <input type="range" min="0" max="100" step="1" id="instrumentalness_min_ui"
+                   value="{{ ((defaults.instrumentalness_min if defaults.instrumentalness_min is defined else 0.45) * 100) | round(0) }}">
+            <input type="range" min="0" max="100" step="1" id="instrumentalness_max_ui"
+                   value="{{ ((defaults.instrumentalness_max if defaults.instrumentalness_max is defined else 0.55) * 100) | round(0) }}">
+
+            <div class="range-track"></div>
+            <div class="range-fill" id="instrumentalness_fill"></div>
+          </div>
+
+          <div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+
+          <div class="dc">
+            <input type="hidden" name="dc_instrumentalness" id="dc_instrumentalness"
+                   value="{{ defaults.dc_instrumentalness if defaults.dc_instrumentalness is defined else '0' }}">
+          </div>
+
+          <input type="hidden" name="instrumentalness_min" id="instrumentalness_min"
+                 value="{{ defaults.instrumentalness_min if defaults.instrumentalness_min is defined else '' }}">
+          <input type="hidden" name="instrumentalness_max" id="instrumentalness_max"
+                 value="{{ defaults.instrumentalness_max if defaults.instrumentalness_max is defined else '' }}">
+          <input type="hidden" name="instrumentalness" id="instrumentalness" value="{{ defaults.instrumentalness }}">
+        </div>
+
+
+        <!-- VALENCE -->
+        <div class="slider-block" data-range="valence" data-scale="100">
+          <div class="slider-head">
+            <div>What mood?</div>
+            <div class="value"><span id="valence_out"></span></div>
+          </div>
+          <div class="slider-labels"><span>Sad</span><span>Happy</span></div>
+
+          <div class="range-wrap" data-name="valence">
+            <input type="range" min="0" max="100" step="1" id="valence_min_ui"
+                   value="{{ ((defaults.valence_min if defaults.valence_min is defined else 0.45) * 100) | round(0) }}">
+            <input type="range" min="0" max="100" step="1" id="valence_max_ui"
+                   value="{{ ((defaults.valence_max if defaults.valence_max is defined else 0.55) * 100) | round(0) }}">
+
+            <div class="range-track"></div>
+            <div class="range-fill" id="valence_fill"></div>
+          </div>
+
+          <div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+
+          <div class="dc">
+            <input type="hidden" name="dc_valence" id="dc_valence"
+                   value="{{ defaults.dc_valence if defaults.dc_valence is defined else '0' }}">
+          </div>
+
+          <input type="hidden" name="valence_min" id="valence_min"
+                 value="{{ defaults.valence_min if defaults.valence_min is defined else '' }}">
+          <input type="hidden" name="valence_max" id="valence_max"
+                 value="{{ defaults.valence_max if defaults.valence_max is defined else '' }}">
+
+          <input type="hidden" name="valence" id="valence" value="{{ defaults.valence }}">
+        </div>
+
+
+        
+
+
+
+        <!-- ADVANCED -->
+        <details class="advanced">
+          <summary>Advanced options</summary>
+
+          <div class="grid-2">
+
+            <div class="row">
+              <label><strong>Tempo (BPM)</strong></label>
+              <div class="minmax">
+                <input type="number" step="any" min="20" max="250"
+                       id="tempo_min" name="tempo_min"
+                       placeholder="min"
+                       value="{{ defaults.tempo_min if defaults.tempo_min is defined else '' }}">
+                <input type="number" step="any" min="20" max="250"
+                       id="tempo_max" name="tempo_max"
+                       placeholder="max"
+                       value="{{ defaults.tempo_max if defaults.tempo_max is defined else '' }}">
+              </div>
+              <input type="hidden" id="tempo" name="tempo" value="{{ defaults.tempo }}">
+            </div>
+
+            <div class="row">
+              <label><strong>Loudness (dB)</strong></label>
+              <div class="minmax">
+                <input type="number" step="any" min="-60" max="5"
+                       id="loudness_min" name="loudness_min"
+                       placeholder="min"
+                       value="{{ defaults.loudness_min if defaults.loudness_min is defined else '' }}">
+                <input type="number" step="any" min="-60" max="5"
+                       id="loudness_max" name="loudness_max"
+                       placeholder="max"
+                       value="{{ defaults.loudness_max if defaults.loudness_max is defined else '' }}">
+              </div>
+              <input type="hidden" id="loudness" name="loudness" value="{{ defaults.loudness }}">
+            </div>
+
+            <div class="row">
+              <label><strong>Acousticness (0–1)</strong></label>
+              <div class="minmax">
+                <input type="number" step="any" min="0" max="1"
+                       id="acousticness_min" name="acousticness_min"
+                       placeholder="min"
+                       value="{{ defaults.acousticness_min if defaults.acousticness_min is defined else '' }}">
+                <input type="number" step="any" min="0" max="1"
+                       id="acousticness_max" name="acousticness_max"
+                       placeholder="max"
+                       value="{{ defaults.acousticness_max if defaults.acousticness_max is defined else '' }}">
+              </div>
+              <input type="hidden" id="acousticness" name="acousticness" value="{{ defaults.acousticness }}">
+            </div>
+
+            <div class="row">
+              <label><strong>Speechiness (0–1)</strong></label>
+              <div class="minmax">
+                <input type="number" step="any" min="0" max="1"
+                       id="speechiness_min" name="speechiness_min"
+                       placeholder="min"
+                       value="{{ defaults.speechiness_min if defaults.speechiness_min is defined else '' }}">
+                <input type="number" step="any" min="0" max="1"
+                       id="speechiness_max" name="speechiness_max"
+                       placeholder="max"
+                       value="{{ defaults.speechiness_max if defaults.speechiness_max is defined else '' }}">
+              </div>
+              <input type="hidden" id="speechiness" name="speechiness" value="{{ defaults.speechiness }}">
+            </div>
+
+            <div class="row">
+              <label><strong>Liveness (0–1)</strong></label>
+              <div class="minmax">
+                <input type="number" step="any" min="0" max="1"
+                       id="liveness_min" name="liveness_min"
+                       placeholder="min"
+                       value="{{ defaults.liveness_min if defaults.liveness_min is defined else '' }}">
+                <input type="number" step="any" min="0" max="1"
+                       id="liveness_max" name="liveness_max"
+                       placeholder="max"
+                       value="{{ defaults.liveness_max if defaults.liveness_max is defined else '' }}">
+              </div>
+              <input type="hidden" id="liveness" name="liveness" value="{{ defaults.liveness }}">
+            </div>
+
+            <div class="row">
+              <label for="mode"><strong>Mode</strong></label>
+              <select id="mode" name="mode">
+                <option value="1" {% if defaults.get("mode", 1)|int == 1 %}selected{% endif %}>Major</option>
+                <option value="0" {% if defaults.get("mode", 1)|int == 0 %}selected{% endif %}>Minor</option>
+              </select>
+            </div>
+
+            <div class="row">
+              <label for="key"><strong>Key</strong></label>
+              <select id="key" name="key">
+                <option value="-1" {% if defaults.get("key", -1)|int == -1 %}selected{% endif %}>Unknown</option>
+                <option value="0"  {% if defaults.get("key", -1)|int == 0 %}selected{% endif %}>C</option>
+                <option value="1"  {% if defaults.get("key", -1)|int == 1 %}selected{% endif %}>C♯ / D♭</option>
+                <option value="2"  {% if defaults.get("key", -1)|int == 2 %}selected{% endif %}>D</option>
+                <option value="3"  {% if defaults.get("key", -1)|int == 3 %}selected{% endif %}>D♯ / E♭</option>
+                <option value="4"  {% if defaults.get("key", -1)|int == 4 %}selected{% endif %}>E</option>
+                <option value="5"  {% if defaults.get("key", -1)|int == 5 %}selected{% endif %}>F</option>
+                <option value="6"  {% if defaults.get("key", -1)|int == 6 %}selected{% endif %}>F♯ / G♭</option>
+                <option value="7"  {% if defaults.get("key", -1)|int == 7 %}selected{% endif %}>G</option>
+                <option value="8"  {% if defaults.get("key", -1)|int == 8 %}selected{% endif %}>G♯ / A♭</option>
+                <option value="9"  {% if defaults.get("key", -1)|int == 9 %}selected{% endif %}>A</option>
+                <option value="10" {% if defaults.get("key", -1)|int == 10 %}selected{% endif %}>A♯ / B♭</option>
+                <option value="11" {% if defaults.get("key", -1)|int == 11 %}selected{% endif %}>B</option>
+              </select>
+            </div>
+
+            <div class="row">
+              <label for="time_signature"><strong>Time signature</strong></label>
+              <select id="time_signature" name="time_signature">
+                {% for ts in [3,4,5,6,7] %}
+                  <option value="{{ ts }}" {% if defaults.get("time_signature", 4)|int == ts %}selected{% endif %}>
+                {{ ts }}/4
+              </option> 
+                {% endfor %}
+              </select>
+            </div>
+
+          </div>
+        </details>
+
+        <button class="btn" type="submit">Generate 50-song playlist</button>
+
+        <div class="small-actions">
+          <a class="link" id="download_json" href="#">Download JSON</a>
+        </div>
+      </form>
+    </section>
+
+    <section id="results" class="results">
+      {% if message %}
+        <p class="message">{{ message|safe }}</p>
+      {% endif %}
+
+      {% if results %}
+        <div class="criteria">
+          <strong>Your criteria:</strong>
+          <span>
+            Danceability
+            {{
+              ((defaults.danceability_min if defaults.danceability_min is defined else defaults.danceability) * 100) | round(0)
+            }}–{{
+              ((defaults.danceability_max if defaults.danceability_max is defined else defaults.danceability) * 100) | round(0)
+            }}
+            |
+            Energy
+            {{
+              ((defaults.energy_min if defaults.energy_min is defined else defaults.energy) * 100) | round(0)
+            }}–{{
+              ((defaults.energy_max if defaults.energy_max is defined else defaults.energy) * 100) | round(0)
+            }}
+            |
+            Instrumentalness
+            {{
+              ((defaults.instrumentalness_min if defaults.instrumentalness_min is defined else defaults.instrumentalness) * 100) | round(0)
+            }}–{{
+              ((defaults.instrumentalness_max if defaults.instrumentalness_max is defined else defaults.instrumentalness) * 100) | round(0)
+            }}
+            |
+            Mood
+            {{
+              ((defaults.valence_min if defaults.valence_min is defined else defaults.valence) * 100) | round(0)
+            }}–{{
+              ((defaults.valence_max if defaults.valence_max is defined else defaults.valence) * 100) | round(0)
+            }}
+            |
+            Genres {{ defaults.genres if defaults.genres else "All" }}
+            |
+            Artists {{ defaults.artists if defaults.artists else "All" }}
+          </span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="song-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Song</th>
+                <th>Artist</th>
+                <th>Genre</th>
+                <th>BPM</th>
+                <th>Match</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in results %}
+              <tr>
+                <td style="text-align:center; width:36px;">
+                  <input
+                    type="checkbox"
+                    class="include-track"
+                    checked
+                    data-track-id="{{ r.get('track_id','') }}"
+                    aria-label="Include track">
+                </td>
+                <td>{{ r.get("track_name","") }}</td>
+                <td>{{ r.get("artists","") }}</td>
+                <td>{{ r.get("track_genre","") }}</td>
+                <td>{{ r.get("bpm", "-") }}</td>
+                <td>{{ "%.2f"|format(r.get("match", 0)) if r.get("match", None) is not none else "" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="spotify-actions">
+          <button class="btn spotify" type="button" id="btn_spotify_add" disabled>Add to Spotify</button>
+        </div>
+
+        <p id="spotify_msg" class="message" style="display:none;"></p>
+
+      {% else %}
+        <p class="hint">Choose your criteria and generate a playlist.</p>
+      {% endif %}
+    </section>
+  </main>
+
+  <script>
+    window.SISMA_TOP_GENRES = {{ genres|tojson }};
+  </script>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+
+  <script>
+    // Build Download JSON link with current form parameters
+    (function() {
+      const form = document.querySelector("form.form");
+      const download = document.getElementById("download_json");
+      if (!form || !download) return;
+
+      function updateDownloadLink() {
+        const params = new URLSearchParams(new FormData(form));
+        params.set("format", "json");
+        const baseUrl = form.getAttribute("action").split("#")[0];
+        download.href = baseUrl + "?" + params.toString();
+      }
+
+      form.addEventListener("input", updateDownloadLink);
+      updateDownloadLink();
+    })();
+  </script>
+
+  <!-- Spotify integration -->
+  <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
+</body>
+</html>
