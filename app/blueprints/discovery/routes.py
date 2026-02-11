@@ -10,8 +10,21 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 
 from app.services.presets import PRESETS
 from app.services.genre_builder import search_genres
+from app.services.region_genres import get_region_payload
 
 bp = Blueprint("discovery", __name__)
+
+
+
+@bp.get("/api/region-genres")
+def api_region_genres():
+    iso = (request.args.get("iso") or "").strip() or None
+    key = (request.args.get("key") or "").strip() or None
+    top_n = request.args.get("top_n", type=int) or 120
+
+    payload = get_region_payload(iso=iso, key=key, top_n=top_n)
+    status = 200 if payload.get("ok") else 400
+    return jsonify(payload), status
 
 
 # ----------------------------
@@ -303,6 +316,7 @@ def index():
         "genres": "",
         "exclude_artists": "",
         "exclude_genres": "",
+        "region_isos": "",
     }
 
     return render_template(
@@ -321,6 +335,8 @@ def generate():
     store = current_app.config["DATASTORE"]
 
     track_id = (request.args.get("track_id") or "").strip()
+    region_isos_raw = (request.args.get("region_isos") or "").strip()
+
 
     (
         artists,
@@ -402,7 +418,6 @@ def generate():
     # ----------------------------
     # DISCOVERY PATCH: strict semantics + HARD tempo when requested
     # ----------------------------
-    strict_semantics = True
     lock_tempo = "tempo" in ranges  # tempo becomes HARD only if user provided tempo_min/max
 
     # ---------------------------
@@ -418,78 +433,45 @@ def generate():
         user_input = _build_user_input_from_track_row(r)
         user_input = _apply_similarity_blend(user_input)
 
-        if bucket_count <= 0:
-            playlist_df = recommender.recommend(
-                user_input=user_input,
-                genre="",
-                k=50,
-                max_per_artist=2,
-                shuffle_within_top=True,
-                exclude_track_ids={track_id},
-                dontcare=dontcare,
-                ranges=ranges,
-                exclude_artists=exclude_artists,
-                exclude_genres=exclude_genres,
-                strict_semantics=strict_semantics,
-                lock_tempo=lock_tempo,
-            )
 
-        elif bucket_count == 1:
-            if len(genres_list) == 1:
-                playlist_df = recommender.recommend(
-                    user_input=user_input,
-                    genre=genres_list[0],
-                    k=50,
-                    max_per_artist=2,
-                    shuffle_within_top=True,
-                    exclude_track_ids={track_id},
-                    dontcare=dontcare,
-                    ranges=ranges,
-                    exclude_artists=exclude_artists,
-                    exclude_genres=exclude_genres,
-                    strict_semantics=strict_semantics,
-                    lock_tempo=lock_tempo,
-                )
-            else:
-                playlist_df = recommender.recommend_bucketed(
-                    user_input=user_input,
-                    artist_buckets=[artists[0]],
-                    genre_buckets=[],
-                    artist_weights=[artist_weights[0]] if artist_weights else None,
-                    k=50,
-                    allow_explicit=False,
-                    max_per_artist=2,
-                    shuffle_within_top=True,
-                    exclude_track_ids={track_id},
-                    dontcare=dontcare,
-                    fallback=False,
-                    ranges=ranges,
-                    exclude_artists=exclude_artists,
-                    exclude_genres=exclude_genres,
-                    strict_semantics=strict_semantics,
-                    lock_tempo=lock_tempo,
-                )
+        # 1) Build a BIG pool around the similarity user_input, constrained by ranges.
+        #    lock_tempo=True iff user set tempo_min/max (hard BPM when requested)
+        pool_df = recommender.build_pool(
+            user_input=user_input,
+            ranges=ranges,
+            lock_tempo=lock_tempo,
+            allow_explicit=False,
+            exclude_track_ids={track_id},   # avoid recommending the seed track back
+            shuffle_within_top=True,
+            random_state=42,
+            dontcare=dontcare,
+        )
 
-        else:
-            playlist_df = recommender.recommend_bucketed(
-                user_input=user_input,
-                artist_buckets=artists,
-                genre_buckets=genres_list,
-                artist_weights=artist_weights,
-                genre_weights=genre_weights,
-                k=50,
-                allow_explicit=False,
-                max_per_artist=2,
-                shuffle_within_top=True,
-                exclude_track_ids={track_id},
-                dontcare=dontcare,
-                fallback=True,
-                ranges=ranges,
-                exclude_artists=exclude_artists,
-                exclude_genres=exclude_genres,
-                strict_semantics=strict_semantics,
-                lock_tempo=lock_tempo,
-            )
+        if "_row_idx" not in pool_df.columns:
+            raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
+
+        pool_idx = pool_df["_row_idx"].to_numpy()
+
+
+        # 2) Second stage: filter/rank INSIDE the pool
+        playlist_df = recommender.recommend_from_pool(
+            user_input=user_input,
+            pool_idx=pool_idx,
+            k=50,
+            max_per_artist=2,
+            include_artists=artists,
+            include_genres=genres_list,
+            include_mode="prefer",          # DISCOVERY: adding "pop" must not shrink the pool
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+            exclude_track_ids=set(),
+            allow_explicit=False,
+            dontcare=dontcare,
+            weight_overrides=None,
+            shuffle_within_top=True,
+            random_state=42,
+        )
+
 
         playlist_df = _sort_and_dedup(playlist_df).head(50).reset_index(drop=True)
 
@@ -505,6 +487,8 @@ def generate():
             "genres": genres_raw,
             "exclude_artists": exclude_artists_raw,
             "exclude_genres": exclude_genres_raw,
+            "region_isos": region_isos_raw,
+
         }
 
         for f in RANGE_FEATURES:
@@ -552,74 +536,44 @@ def generate():
         "time_signature": _get_float("time_signature", 4.0),
     }
 
-    if bucket_count <= 0:
-        playlist_df = recommender.recommend(
-            user_input=user_input,
-            genre="",
-            k=50,
-            max_per_artist=2,
-            shuffle_within_top=True,
-            dontcare=dontcare,
-            ranges=ranges,
-            exclude_artists=exclude_artists,
-            exclude_genres=exclude_genres,
-            strict_semantics=strict_semantics,
-            lock_tempo=lock_tempo,
-        )
+    # 1) Build a BIG pool from preset-like ranges (soft, but tempo can be HARD)
+    pool_df = recommender.build_pool(
+        user_input=user_input,
+        ranges=ranges,
+        lock_tempo=lock_tempo,          # True iff tempo range provided
+        allow_explicit=False,
+        exclude_track_ids=set(),        # custom mode: nothing to exclude by id
+        shuffle_within_top=True,
+        random_state=42,
+        dontcare=dontcare,
+    )
 
-    elif bucket_count == 1:
-        if len(genres_list) == 1:
-            playlist_df = recommender.recommend(
-                user_input=user_input,
-                genre=genres_list[0],
-                k=50,
-                max_per_artist=2,
-                shuffle_within_top=True,
-                dontcare=dontcare,
-                ranges=ranges,
-                exclude_artists=exclude_artists,
-                exclude_genres=exclude_genres,
-                strict_semantics=strict_semantics,
-                lock_tempo=lock_tempo,
-            )
-        else:
-            playlist_df = recommender.recommend_bucketed(
-                user_input=user_input,
-                artist_buckets=[artists[0]],
-                genre_buckets=[],
-                artist_weights=[artist_weights[0]] if artist_weights else None,
-                k=50,
-                allow_explicit=False,
-                max_per_artist=2,
-                shuffle_within_top=True,
-                dontcare=dontcare,
-                fallback=False,
-                ranges=ranges,
-                exclude_artists=exclude_artists,
-                exclude_genres=exclude_genres,
-                strict_semantics=strict_semantics,
-                lock_tempo=lock_tempo,
-            )
+    # pool indices for second-stage filtering/ranking
+    if "_row_idx" not in pool_df.columns:
+        raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
 
-    else:
-        playlist_df = recommender.recommend_bucketed(
-            user_input=user_input,
-            artist_buckets=artists,
-            genre_buckets=genres_list,
-            artist_weights=artist_weights,
-            genre_weights=genre_weights,
-            k=50,
-            allow_explicit=False,
-            max_per_artist=2,
-            shuffle_within_top=True,
-            dontcare=dontcare,
-            fallback=True,
-            ranges=ranges,
-            exclude_artists=exclude_artists,
-            exclude_genres=exclude_genres,
-            strict_semantics=strict_semantics,
-            lock_tempo=lock_tempo,
-        )
+    pool_idx = pool_df["_row_idx"].to_numpy()
+
+
+    # 2) Second stage: apply preferences INSIDE the pool
+    playlist_df = recommender.recommend_from_pool(
+        user_input=user_input,
+        pool_idx=pool_idx,
+        k=50,
+        max_per_artist=2,
+        include_artists=artists,
+        include_genres=genres_list,
+        include_mode="prefer",          # discovery behavior: don't shrink pool
+        exclude_artists=exclude_artists,
+        exclude_genres=exclude_genres,
+        exclude_track_ids={track_id},   # keep it out even after ranking
+        allow_explicit=False,
+        dontcare=dontcare,
+        weight_overrides=None,
+        shuffle_within_top=True,
+        random_state=42,
+    )
+
 
     playlist_df = _sort_and_dedup(playlist_df).head(50).reset_index(drop=True)
 
@@ -635,6 +589,7 @@ def generate():
         "genres": genres_raw,
         "exclude_artists": exclude_artists_raw,
         "exclude_genres": exclude_genres_raw,
+        "region_isos": region_isos_raw,
     }
     for f in RANGE_FEATURES:
         mn, mx = ranges.get(f, (None, None))

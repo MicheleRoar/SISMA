@@ -617,3 +617,89 @@ select:focus, input:focus{
   padding: 18px 0 10px; /* niente padding laterale: lo “simuliamo” con width */
 }
 
+
+/* ===== Region map: full width, tall ===== */
+
+#region_map_wrapper{
+  width: 100%;
+  max-width: none;
+  margin: 12px 0 24px 0;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,.10);
+  background: rgba(10,20,35,.03);
+}
+
+#world_svg_host{
+  width: 100%;
+}
+
+/* SVG: occupy space */
+#world_svg_host svg{
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 68vh;
+}
+
+/* Interazione base */
+#world_svg_host [data-iso]{
+  cursor: pointer;
+  stroke: rgba(255,255,255,.55);
+  stroke-width: .8;
+  transition: fill .10s ease, opacity .10s ease, stroke-width .10s ease, stroke .10s ease;
+}
+
+/* Hover */
+#world_svg_host [data-iso]:hover{
+  opacity: .90;
+  stroke-width: 1.3;
+}
+
+/* Stato attivo (selezionato) */
+#world_svg_host [data-iso].active{
+  fill: #FFD403;
+  stroke: rgba(0,0,0,.85);
+  stroke-width: 1.6;
+}
+
+#world_svg_host [data-iso].active:hover{
+  fill: #FFD403;
+}
+
+
+/* Mobile */
+@media (max-width: 768px){
+  #world_svg_host svg{
+    max-height: 52vh;
+  }
+}
+
+/* CTA: Generate playlist */
+button.btn[type="submit"],
+.btn-primary {
+  background: #FFD403 !important;
+  border-color: #FFD403 !important;
+  color: #0b0b0c !important; /* testo scuro */
+  font-weight: 900;
+}
+
+button.btn[type="submit"]:hover,
+.btn-primary:hover {
+  filter: brightness(0.95);
+}
+
+.region-controls{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  margin-top:10px;
+}
+
+#region_status{
+  color: rgba(255,255,255,.85);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+

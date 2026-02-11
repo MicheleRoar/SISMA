@@ -10,8 +10,25 @@
   //  - optional legacy midpoint hidden: {name}
   //  - label: {name}_out
   // Wrap element: .range-wrap[data-name="{name}"]
+  //
+  // Optional dataset on wrap:
+  //  - data-min / data-max for scaling real values
+  //  - OR data-db="1" for loudness mapping (-60..+5)
   // -----------------------------
+
+  function getScale(wrap) {
+    if (!wrap) return { dmin: 0, dmax: 1 };
+
+    // loudness special-case
+    if (wrap.dataset.db === "1") return { dmin: -60, dmax: 5 };
+
+    const dmin = wrap.dataset.min != null ? Number(wrap.dataset.min) : 0;
+    const dmax = wrap.dataset.max != null ? Number(wrap.dataset.max) : 1;
+    return { dmin, dmax };
+  }
+
   function clampRanges(name) {
+    const wrap = document.querySelector(`.range-wrap[data-name="${name}"]`);
     const minEl = document.getElementById(`${name}_min_ui`);
     const maxEl = document.getElementById(`${name}_max_ui`);
     const fill = document.getElementById(`${name}_fill`);
@@ -19,44 +36,55 @@
     const hMin = document.getElementById(`${name}_min`);
     const hMax = document.getElementById(`${name}_max`);
     const hMid = document.getElementById(name); // optional legacy midpoint
-
     const out = document.getElementById(`${name}_out`);
 
-    if (!minEl || !maxEl || !hMin || !hMax) return;
+    if (!minEl || !maxEl) return;
 
-    let a = parseInt(minEl.value, 10);
-    let b = parseInt(maxEl.value, 10);
-    if (Number.isNaN(a)) a = 0;
-    if (Number.isNaN(b)) b = 100;
+    let a = Number(minEl.value);
+    let b = Number(maxEl.value);
 
-    // keep order
+    // keep a <= b
     if (a > b) {
-      if (document.activeElement === minEl) b = a;
-      else a = b;
+      const tmp = a;
+      a = b;
+      b = tmp;
       minEl.value = String(a);
       maxEl.value = String(b);
     }
 
-    // fill bar (optional)
+    // update fill (0..100)
     if (fill) {
       fill.style.left = `${a}%`;
-      fill.style.width = `${Math.max(0, b - a)}%`;
+      fill.style.width = `${b - a}%`;
     }
 
-    // hidden payload: 0..1
-    hMin.value = (a / 100).toFixed(3);
-    hMax.value = (b / 100).toFixed(3);
+    // scaled values -> hidden fields
+    const { dmin, dmax } = getScale(wrap);
+    const fromPct = (pct) => dmin + (pct / 100) * (dmax - dmin);
 
-    // optional legacy midpoint
-    if (hMid) hMid.value = (((a + b) / 2) / 100).toFixed(3);
+    if (hMin) hMin.value = String(fromPct(a));
+    if (hMax) hMax.value = String(fromPct(b));
 
-    // label
-    if (out) out.textContent = `${a}–${b}`;
+    // optional midpoint legacy hidden
+    if (hMid) hMid.value = String(fromPct((a + b) / 2));
+
+    // output label
+    if (out) {
+      if (wrap && wrap.dataset.db === "1") {
+        // show dB nicely
+        const va = fromPct(a).toFixed(1);
+        const vb = fromPct(b).toFixed(1);
+        out.textContent = `${va} – ${vb} dB`;
+      } else {
+        out.textContent = `${Math.round(a)} – ${Math.round(b)}`;
+      }
+    }
   }
 
   function initDualRangeWrap(wrap) {
     const name = wrap.getAttribute("data-name");
     if (!name) return;
+
     const minEl = document.getElementById(`${name}_min_ui`);
     const maxEl = document.getElementById(`${name}_max_ui`);
     if (!minEl || !maxEl) return;
@@ -71,24 +99,20 @@
   document.querySelectorAll(".range-wrap").forEach(initDualRangeWrap);
 
   // -----------------------------
-  // Dont care checkbox (only for the 4 main ones)
-  // Expects:
-  //  - checkbox: dc_{name}_ui
-  //  - hidden: dc_{name} (0/1)
-  //  - we disable BOTH min/max sliders: {name}_min_ui / {name}_max_ui
-  // NOTE: if UI checkbox doesn't exist, this is a no-op (safe).
+  // Dont care checkbox (optional UI)
+  // If checkbox is missing in HTML, this does nothing.
   // -----------------------------
   function bindDontCareRange(name) {
-    const dc = document.getElementById(`dc_${name}_ui`);
+    const dcUi = document.getElementById(`dc_${name}_ui`); // optional
     const hidden = document.getElementById(`dc_${name}`);
     const minEl = document.getElementById(`${name}_min_ui`);
     const maxEl = document.getElementById(`${name}_max_ui`);
     const wrap = document.querySelector(`.range-wrap[data-name="${name}"]`);
 
-    if (!dc || !hidden || !minEl || !maxEl) return;
+    if (!dcUi || !hidden || !minEl || !maxEl) return;
 
     function sync() {
-      const on = dc.checked;
+      const on = dcUi.checked;
       hidden.value = on ? "1" : "0";
 
       minEl.disabled = on;
@@ -97,14 +121,14 @@
       const opacity = on ? "0.35" : "1";
       minEl.style.opacity = opacity;
       maxEl.style.opacity = opacity;
-      if (wrap) wrap.style.opacity = "1"; // keep labels readable; sliders already dim
+      if (wrap) wrap.style.opacity = "1";
     }
 
-    dc.addEventListener("change", sync);
+    dcUi.addEventListener("change", sync);
     sync();
   }
 
-  ["danceability", "energy", "instrumentalness", "valence"].forEach(bindDontCareRange);
+  ["danceability", "energy", "loudness", "valence"].forEach(bindDontCareRange);
 
   // -----------------------------
   // Preset loader
@@ -112,17 +136,18 @@
   const presetSel = document.getElementById("preset");
 
   function setDualRange01(name, mn01, mx01) {
+    // sets UI sliders from 0..1 values
     const minEl = document.getElementById(`${name}_min_ui`);
     const maxEl = document.getElementById(`${name}_max_ui`);
     if (!minEl || !maxEl) return;
 
-    const a = Math.round(Math.max(0, Math.min(1, Number(mn01))) * 100);
-    const b = Math.round(Math.max(0, Math.min(1, Number(mx01))) * 100);
+    const clamp01 = (x) => Math.max(0, Math.min(1, Number(x)));
+    const a = Math.round(clamp01(mn01) * 100);
+    const b = Math.round(clamp01(mx01) * 100);
 
     minEl.value = String(a);
     maxEl.value = String(b);
 
-    // trigger clamp+hidden sync
     minEl.dispatchEvent(new Event("input", { bubbles: true }));
     maxEl.dispatchEvent(new Event("input", { bubbles: true }));
   }
@@ -136,12 +161,10 @@
   }
 
   function resetDontCareOff() {
-    ["danceability", "energy", "instrumentalness", "valence"].forEach((f) => {
-      const ui = document.getElementById(`dc_${f}_ui`);
+    ["danceability", "energy", "loudness", "valence"].forEach((f) => {
       const h = document.getElementById(`dc_${f}`);
-      if (ui) ui.checked = false;
       if (h) h.value = "0";
-      // re-enable sliders
+
       const minEl = document.getElementById(`${f}_min_ui`);
       const maxEl = document.getElementById(`${f}_max_ui`);
       if (minEl) {
@@ -162,22 +185,23 @@
     if (!res.ok) return;
 
     const p = await res.json();
-
-    // preset implies you care (for the 4 main)
     resetDontCareOff();
 
-    // MAIN dual ranges (0..1 -> 0..100)
+    // ONLY the 4 main dual sliders:
     if (p.danceability_min != null && p.danceability_max != null) setDualRange01("danceability", p.danceability_min, p.danceability_max);
     if (p.energy_min != null && p.energy_max != null) setDualRange01("energy", p.energy_min, p.energy_max);
-    if (p.instrumentalness_min != null && p.instrumentalness_max != null) setDualRange01("instrumentalness", p.instrumentalness_min, p.instrumentalness_max);
     if (p.valence_min != null && p.valence_max != null) setDualRange01("valence", p.valence_min, p.valence_max);
 
-    // ADVANCED numeric min/max (these are <input type="number">, not sliders)
+    // loudness comes in dB usually, so set advanced min/max instead (and let UI be whatever)
+    setIfPresent("loudness_min", p.loudness_min);
+    setIfPresent("loudness_max", p.loudness_max);
+
+    // advanced numeric min/max
     setIfPresent("tempo_min", p.tempo_min);
     setIfPresent("tempo_max", p.tempo_max);
 
-    setIfPresent("loudness_min", p.loudness_min);
-    setIfPresent("loudness_max", p.loudness_max);
+    setIfPresent("instrumentalness_min", p.instrumentalness_min);
+    setIfPresent("instrumentalness_max", p.instrumentalness_max);
 
     setIfPresent("acousticness_min", p.acousticness_min);
     setIfPresent("acousticness_max", p.acousticness_max);
@@ -188,18 +212,16 @@
     setIfPresent("liveness_min", p.liveness_min);
     setIfPresent("liveness_max", p.liveness_max);
 
-    // Genre preset (chips) — include only
-    if (typeof window.SISMA_setGenres === "function") {
-      const g = (typeof p.genre === "string") ? p.genre.trim() : "";
-      if (g) window.SISMA_setGenres([g]);
-      else window.SISMA_setGenres([]);
-    }
+    setIfPresent("mode", p.mode);
+    setIfPresent("key", p.key);
+    setIfPresent("time_signature", p.time_signature);
   }
 
   if (presetSel) {
     presetSel.addEventListener("change", (ev) => loadPreset(ev.target.value));
   }
 })();
+
 
 
 // --- Song search + autocomplete ---
@@ -292,7 +314,7 @@
     if (preset) preset.value = "";
 
     // turn dont-care off for 4 main ranges
-    ["danceability", "energy", "instrumentalness", "valence"].forEach((name) => {
+    ["danceability", "energy", "loudness", "valence"].forEach((name) => {
       const dcUi = document.getElementById(`dc_${name}_ui`);
       const dcH = document.getElementById(`dc_${name}`);
       if (dcUi) dcUi.checked = false;
@@ -483,12 +505,21 @@
     }
 
     function renderChips() {
+      const regionEl = document.getElementById("region_isos");
+      const regionOn = regionEl && String(regionEl.value || "").trim().length > 0;
+      if (regionOn) {
+        chips.innerHTML = "";
+        chips.style.display = "none";
+        return;
+      }
+
       const values = Array.from(selected.values());
       if (values.length === 0) {
         chips.innerHTML = "";
         chips.style.display = "none";
         return;
       }
+
       chips.style.display = "flex";
       chips.innerHTML = values
         .map((g) => {
@@ -502,6 +533,7 @@
         })
         .join("");
     }
+
 
     function addGenre(name) {
       const cleaned = String(name || "").trim();
@@ -918,20 +950,460 @@
     };
   }
 
-  // include artists (with weights)
-  makeArtistPicker({
-    inputId: "artist_query",
-    boxId: "artist_suggestions",
-    chipsId: "artist_chips",
-    hiddenId: "artists",
-    hiddenWeightsId: "artist_weights",
+const includeArtistPicker = makeArtistPicker({
+  inputId: "artist_query",
+  boxId: "artist_suggestions",
+  chipsId: "artist_chips",
+  hiddenId: "artists",
+  hiddenWeightsId: "artist_weights",
+});
+
+const excludeArtistPicker = makeArtistPicker({
+  inputId: "exclude_artist_query",
+  boxId: "exclude_artist_suggestions",
+  chipsId: "exclude_artist_chips",
+  hiddenId: "exclude_artists",
+});
+
+})();
+
+function getCurrentGenres() {
+  const hidden = document.getElementById("genres");
+  return hidden ? parseHiddenList(hidden.value) : [];
+}
+
+
+// =====================================================
+// WORLD.SVG MAP -> MULTI-SELECT COUNTRIES -> GENRES UNION
+// (NO SimpleMaps)
+// =====================================================
+
+// ---- Region selection state ----
+const REGION_STATE = {
+  enabled: true,
+  mode: "union",
+  selected: new Set(),
+  cache: new Map(),
+  suppressChips: true,
+  prevGenres: null
+};
+
+// Optional labels (fallback to ISO if unknown)
+const ISO2_LABEL = {
+  IT: "Italy",
+  FR: "France",
+  DE: "Germany",
+  ES: "Spain",
+  PT: "Portugal",
+  GB: "United Kingdom",
+  IE: "Ireland",
+  US: "United States",
+  CA: "Canada",
+  CH: "Switzerland",
+  AT: "Austria",
+  NL: "Netherlands",
+  BE: "Belgium",
+  SE: "Sweden",
+  NO: "Norway",
+  DK: "Denmark",
+  FI: "Finland",
+  IS: "Iceland",
+  PL: "Poland",
+  CZ: "Czech Republic",
+  HU: "Hungary",
+  RO: "Romania",
+  BG: "Bulgaria",
+  GR: "Greece",
+  TR: "Turkey",
+  AL: "Albania",
+  AU: "Australia",
+  IN: "India",
+  JP: "Japan",
+  CN: "China",
+  MX: "Mexico",
+  AR: "Argentina",
+  BR: "Brazil",
+  CL: "Chile",
+  CO: "Colombia",
+  PE: "Peru",
+  VE: "Venezuela"
+};
+
+
+// Map colors (JS-enforced: overrides inline SVG fills)
+const MAP_COLORS = {
+  defaultFill: "#0b0b0c",
+  defaultStroke: "rgba(255,255,255,.55)",
+  hoverFill: "#1a1a1d",
+  activeFill: "#FFD403",
+  activeStroke: "#ffffff",
+};
+
+// -----------------------------
+// Helpers: hidden list + chips
+// -----------------------------
+function parseHiddenList(value) {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function writeHiddenList(el, items) {
+  el.value = items.join(","); // CSV
+}
+
+function renderChips(containerEl, items, hiddenInputEl) {
+  containerEl.innerHTML = "";
+
+  items.forEach((genre) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.value = genre;
+    chip.textContent = genre;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip-remove";
+    btn.textContent = "×";
+    btn.addEventListener("click", () => {
+      const current = parseHiddenList(hiddenInputEl.value);
+      const next = current.filter(g => g !== genre);
+      writeHiddenList(hiddenInputEl, next);
+      renderChips(containerEl, next, hiddenInputEl);
+    });
+
+    chip.appendChild(btn);
+    containerEl.appendChild(chip);
+  });
+}
+
+function setIncludeGenres(genres, { replace = true, render = true } = {}) {
+  const hidden = document.getElementById("genres");
+  const chips = document.getElementById("genre_chips");
+  if (!hidden) return;
+
+  const current = parseHiddenList(hidden.value);
+  const set = new Set(current);
+
+  const incoming = (genres || [])
+    .map(g => (g || "").trim())
+    .filter(Boolean);
+
+  let next;
+  if (replace) {
+    next = Array.from(new Set(incoming));
+  } else {
+    incoming.forEach(g => set.add(g));
+    next = Array.from(set);
+  }
+
+  writeHiddenList(hidden, next);
+
+  // In region-mode: suppress chips (but keep hidden updated)
+  if (render && chips) {
+    renderChips(chips, next, hidden);
+  } else if (chips && REGION_STATE.suppressChips) {
+    chips.innerHTML = "";
+  }
+}
+
+// -----------------------------
+// API: fetch region genres
+// -----------------------------
+async function fetchRegionGenres(iso) {
+  iso = String(iso || "").toUpperCase();
+  if (!iso) return [];
+
+  if (REGION_STATE.cache.has(iso)) return REGION_STATE.cache.get(iso);
+
+  const base = window.location.origin;
+  const url = `${base}/api/region-genres?iso=${encodeURIComponent(iso)}&top_n=120`;
+
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error(`Non-JSON response (${res.status}). Body: ${text.slice(0, 80)}`);
+  }
+
+  if (!data.ok) throw new Error(data.error || "API error");
+
+  const genres = data.genres || [];
+  REGION_STATE.cache.set(iso, genres);
+  return genres;
+}
+
+// -----------------------------
+// UI: status line
+// -----------------------------
+function updateRegionStatus() {
+  const status = document.getElementById("region_status");
+  if (!status) return;
+
+  const isos = Array.from(REGION_STATE.selected);
+  if (isos.length === 0) {
+    status.textContent = "";
+    return;
+  }
+
+  const labels = isos.map(i => ISO2_LABEL[i] || i);
+  const shown = labels.slice(0, 2);
+  const extra = labels.length - shown.length;
+
+  status.textContent = extra > 0
+    ? `Regions: ${shown.join(", ")} (+${extra})`
+    : `Regions: ${shown.join(", ")}`;
+}
+
+function isRegionMode() {
+  return REGION_STATE.selected.size > 0;
+}
+
+function writeRegionIsosHidden() {
+  const el = document.getElementById("region_isos");
+  if (!el) return;
+  el.value = Array.from(REGION_STATE.selected).sort().join(",");
+}
+
+function readRegionIsosHidden() {
+  const el = document.getElementById("region_isos");
+  if (!el) return [];
+  return (el.value || "")
+    .split(",")
+    .map(s => s.trim().toUpperCase())
+    .filter(Boolean);
+}
+
+
+// -----------------------------
+// Compute union genres and apply
+// -----------------------------
+function recomputeUnionGenresAndApply() {
+  const all = new Set();
+  for (const iso of REGION_STATE.selected) {
+    const gs = REGION_STATE.cache.get(iso) || [];
+    gs.forEach(g => all.add(g));
+  }
+
+  setIncludeGenres(Array.from(all), {
+    replace: true,
+    render: !REGION_STATE.suppressChips
+  });
+}
+
+// -----------------------------
+// Map coloring (JS-enforced)
+// -----------------------------
+function paintCountry(el, active) {
+  if (!el) return;
+  if (active) {
+    el.style.fill = MAP_COLORS.activeFill;
+    el.style.stroke = MAP_COLORS.activeStroke;
+  } else {
+    el.style.fill = MAP_COLORS.defaultFill;
+    el.style.stroke = MAP_COLORS.defaultStroke;
+  }
+}
+
+function syncMapColorsWithSelection() {
+  const host = document.getElementById("world_svg_host");
+  if (!host) return;
+
+  host.querySelectorAll("[data-iso]").forEach(el => {
+    const iso = (el.getAttribute("data-iso") || "").toUpperCase();
+    const active = REGION_STATE.selected.has(iso);
+    el.classList.toggle("active", active);
+    paintCountry(el, active);
+  });
+}
+
+function bindMapHover() {
+  const host = document.getElementById("world_svg_host");
+  if (!host) return;
+
+  host.addEventListener("mouseover", (ev) => {
+    const el = ev.target.closest("[data-iso]");
+    if (!el) return;
+
+    const iso = (el.getAttribute("data-iso") || "").toUpperCase();
+    if (REGION_STATE.selected.has(iso)) return; // keep active style
+
+    el.style.fill = MAP_COLORS.hoverFill;
   });
 
-  // exclude artists (no weights)
-  makeArtistPicker({
-    inputId: "exclude_artist_query",
-    boxId: "exclude_artist_suggestions",
-    chipsId: "exclude_artist_chips",
-    hiddenId: "exclude_artists",
+  host.addEventListener("mouseout", (ev) => {
+    const el = ev.target.closest("[data-iso]");
+    if (!el) return;
+
+    const iso = (el.getAttribute("data-iso") || "").toUpperCase();
+    if (REGION_STATE.selected.has(iso)) return;
+
+    el.style.fill = MAP_COLORS.defaultFill;
+  });
+}
+
+// -----------------------------
+// Main toggle handler (multi-select)
+// -----------------------------
+async function onRegionClick(iso) {
+  const status = document.getElementById("region_status");
+  iso = String(iso || "").toUpperCase();
+  if (!iso) return;
+
+  try {
+    if (status) status.textContent = `Loading ${ISO2_LABEL[iso] || iso}…`;
+
+    // -----------------------------
+    // toggle OFF
+    // -----------------------------
+    if (REGION_STATE.selected.has(iso)) {
+      REGION_STATE.selected.delete(iso);
+
+      writeRegionIsosHidden();          
+      updateRegionStatus();
+      recomputeUnionGenresAndApply();
+      toggleGenreUIForRegionMode();     
+      syncMapColorsWithSelection();
+
+      if (REGION_STATE.selected.size === 0) {
+        setIncludeGenres(REGION_STATE.prevGenres || [], { replace: true, render: true });
+        REGION_STATE.prevGenres = null;
+        toggleGenreUIForRegionMode();
+      }
+
+      if (status) status.textContent = "";
+      return;
+    }
+
+    // -----------------------------
+    // toggle ON
+    // -----------------------------
+    if (REGION_STATE.selected.size === 0 && REGION_STATE.prevGenres == null) {
+      REGION_STATE.prevGenres = getCurrentGenres();
+    }
+
+    REGION_STATE.selected.add(iso);
+    writeRegionIsosHidden();
+
+    await fetchRegionGenres(iso);
+
+    updateRegionStatus();
+    recomputeUnionGenresAndApply();
+    toggleGenreUIForRegionMode();
+    syncMapColorsWithSelection();
+
+    if (status) status.textContent = "";
+  } catch (e) {
+    if (status) status.textContent = "Region load error";
+    console.error(e);
+    syncMapColorsWithSelection();
+  }
+}
+
+
+// -----------------------------
+// Bind clear button
+// -----------------------------
+(function bindClearRegion() {
+  const clearBtn = document.getElementById("clear_region");
+  if (!clearBtn) return;
+
+  clearBtn.addEventListener("click", () => {
+    REGION_STATE.selected.clear();
+    REGION_STATE.cache.clear();
+    writeRegionIsosHidden();
+    updateRegionStatus();
+
+    setIncludeGenres(REGION_STATE.prevGenres || [], { replace: true, render: true });
+    REGION_STATE.prevGenres = null;
+
+    toggleGenreUIForRegionMode();
+    syncMapColorsWithSelection();
   });
 })();
+
+
+
+// -----------------------------
+// Load SVG map + bind click delegation
+// -----------------------------
+(async function loadAndBindWorldSVG() {
+  const host = document.getElementById("world_svg_host");
+  if (!host) return;
+
+  const res = await fetch("/static/maps/world.svg");
+  const svgText = await res.text();
+  host.innerHTML = svgText;
+
+  // Convert lowercase ISO2 ids (e.g. "it") into data-iso="IT"
+  host.querySelectorAll("svg [id]").forEach(el => {
+    const id = (el.getAttribute("id") || "").trim();
+    if (/^[a-z]{2}$/.test(id)) {
+      el.setAttribute("data-iso", id.toUpperCase());
+    }
+  });
+
+  // Bind hover once
+  bindMapHover();
+
+  // Initial paint (default fill + any preselected)
+  syncMapColorsWithSelection();
+
+  // Click delegation
+  host.addEventListener("click", (ev) => {
+    const el = ev.target.closest("[data-iso]");
+    if (!el) return;
+    const iso = (el.getAttribute("data-iso") || "").toUpperCase();
+    if (!iso) return;
+    onRegionClick(iso);
+  });
+})();
+
+
+function toggleGenreUIForRegionMode() {
+  const chips = document.getElementById("genre_chips");
+  const input = document.getElementById("genre_query");
+  const sugg = document.getElementById("genre_suggestions");
+
+  const on = isRegionMode();
+
+  if (chips) chips.style.display = on ? "none" : "";
+  if (sugg) sugg.style.display = "none"; // chiudi sempre
+  if (input) {
+    input.disabled = on;                 // blocca input quando region-mode
+    input.placeholder = on ? "Controlled by Region selection" : "Add genre…";
+  }
+}
+
+(function restoreRegionSelectionFromHidden() {
+  const isos = readRegionIsosHidden();
+  if (!isos.length) {
+    toggleGenreUIForRegionMode();
+    return;
+  }
+
+  // reimposta stato regioni
+  isos.forEach(iso => REGION_STATE.selected.add(iso));
+  updateRegionStatus();
+  writeRegionIsosHidden();
+
+  // fetch generi per ciascuna regione e applica union
+  Promise.all(isos.map(fetchRegionGenres))
+    .then(() => {
+      recomputeUnionGenresAndApply();
+      toggleGenreUIForRegionMode();
+      syncMapColorsWithSelection();
+    })
+    .catch((e) => {
+      console.error(e);
+      toggleGenreUIForRegionMode();
+      syncMapColorsWithSelection();
+    });
+})();
+

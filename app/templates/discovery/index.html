@@ -152,6 +152,29 @@
           </div>
         </div>
 
+
+
+
+      <div class="row">
+        <label><strong>Region</strong></label>
+
+        <div id="region_map_wrapper">
+          <div id="world_svg_host"></div>
+        </div>
+
+        <div class="region-controls">
+          <button type="button" id="clear_region">Clear</button>
+          <span id="region_status"></span>
+
+          <input type="hidden" id="region_isos" name="region_isos"
+                 value="{{ defaults.region_isos if defaults.region_isos is defined else '' }}">
+        </div>
+
+
+
+
+
+
         <!-- ========================= -->
         <!-- MAIN SLIDERS: MIN / MAX  -->
         <!-- ========================= -->
@@ -222,37 +245,38 @@
         </div>
 
 
-        <!-- INSTRUMENTALNESS -->
+        <!-- LOUDNESS -->
         <div class="slider-block">
           <div class="slider-head">
-            <div>Vocals or instrumental?</div>
-            <div class="value"><span id="instrumentalness_out"></span></div>
+            <div>Loudness (dB)</div>
+            <div class="value"><span id="loudness_out"></span></div>
           </div>
-          <div class="slider-labels"><span>Vocals</span><span>Instrumental</span></div>
+          <div class="slider-labels"><span>Quiet</span><span>Loud</span></div>
 
-          <div class="range-wrap" data-name="instrumentalness">
-            <input type="range" min="0" max="100" step="1" id="instrumentalness_min_ui"
-                   value="{{ ((defaults.instrumentalness_min if defaults.instrumentalness_min is defined else 0.45) * 100) | round(0) }}">
-            <input type="range" min="0" max="100" step="1" id="instrumentalness_max_ui"
-                   value="{{ ((defaults.instrumentalness_max if defaults.instrumentalness_max is defined else 0.55) * 100) | round(0) }}">
+          <div class="range-wrap" data-name="loudness" data-db="1" data-min="-60" data-max="5">
+            <input type="range" min="0" max="100" step="1" id="loudness_min_ui"
+                   value="{{ ((defaults.loudness_min if defaults.loudness_min is defined else -16.0) + 60) / 65 * 100 | round(0) }}">
+            <input type="range" min="0" max="100" step="1" id="loudness_max_ui"
+                   value="{{ ((defaults.loudness_max if defaults.loudness_max is defined else -10.0) + 60) / 65 * 100 | round(0) }}">
 
             <div class="range-track"></div>
-            <div class="range-fill" id="instrumentalness_fill"></div>
+            <div class="range-fill" id="loudness_fill"></div>
           </div>
 
-          <div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+          <div class="range-ticks"><span>-60</span><span>-40</span><span>-20</span><span>0</span><span>+5</span></div>
 
           <div class="dc">
-            <input type="hidden" name="dc_instrumentalness" id="dc_instrumentalness"
-                   value="{{ defaults.dc_instrumentalness if defaults.dc_instrumentalness is defined else '0' }}">
+            <input type="hidden" name="dc_loudness" id="dc_loudness"
+                   value="{{ defaults.dc_loudness if defaults.dc_loudness is defined else '0' }}">
           </div>
 
-          <input type="hidden" name="instrumentalness_min" id="instrumentalness_min"
-                 value="{{ defaults.instrumentalness_min if defaults.instrumentalness_min is defined else '' }}">
-          <input type="hidden" name="instrumentalness_max" id="instrumentalness_max"
-                 value="{{ defaults.instrumentalness_max if defaults.instrumentalness_max is defined else '' }}">
-          <input type="hidden" name="instrumentalness" id="instrumentalness" value="{{ defaults.instrumentalness }}">
+          <input type="hidden" name="loudness_min" id="loudness_min"
+                 value="{{ defaults.loudness_min if defaults.loudness_min is defined else '' }}">
+          <input type="hidden" name="loudness_max" id="loudness_max"
+                 value="{{ defaults.loudness_max if defaults.loudness_max is defined else '' }}">
+          <input type="hidden" name="loudness" id="loudness" value="{{ defaults.loudness }}">
         </div>
+
 
 
         <!-- VALENCE -->
@@ -315,18 +339,18 @@
             </div>
 
             <div class="row">
-              <label><strong>Loudness (dB)</strong></label>
+              <label><strong>Instrumentalness</strong></label>
               <div class="minmax">
-                <input type="number" step="any" min="-60" max="5"
-                       id="loudness_min" name="loudness_min"
+                <input type="number" step="any" min="0" max="1"
+                       id="instrumentalness_min" name="instrumentalness_min"
                        placeholder="min"
-                       value="{{ defaults.loudness_min if defaults.loudness_min is defined else '' }}">
-                <input type="number" step="any" min="-60" max="5"
-                       id="loudness_max" name="loudness_max"
+                       value="{{ defaults.instrumentalness_min if defaults.instrumentalness_min is defined else '' }}">
+                <input type="number" step="any" min="0" max="1"
+                       id="instrumentalness_max" name="instrumentalness_max"
                        placeholder="max"
-                       value="{{ defaults.loudness_max if defaults.loudness_max is defined else '' }}">
+                       value="{{ defaults.instrumentalness_max if defaults.instrumentalness_max is defined else '' }}">
               </div>
-              <input type="hidden" id="loudness" name="loudness" value="{{ defaults.loudness }}">
+              <input type="hidden" id="instrumentalness" name="instrumentalness" value="{{ defaults.instrumentalness }}">
             </div>
 
             <div class="row">
@@ -445,13 +469,9 @@
             }}–{{
               ((defaults.energy_max if defaults.energy_max is defined else defaults.energy) * 100) | round(0)
             }}
-            |
-            Instrumentalness
-            {{
-              ((defaults.instrumentalness_min if defaults.instrumentalness_min is defined else defaults.instrumentalness) * 100) | round(0)
-            }}–{{
-              ((defaults.instrumentalness_max if defaults.instrumentalness_max is defined else defaults.instrumentalness) * 100) | round(0)
-            }}
+            | Loudness
+            {{ "%.1f"|format(defaults.loudness_min) if defaults.loudness_min is not none and defaults.loudness_min != "" else "" }}
+            –{{ "%.1f"|format(defaults.loudness_max) if defaults.loudness_max is not none and defaults.loudness_max != "" else "" }}
             |
             Mood
             {{
@@ -459,8 +479,17 @@
             }}–{{
               ((defaults.valence_max if defaults.valence_max is defined else defaults.valence) * 100) | round(0)
             }}
-            |
-            Genres {{ defaults.genres if defaults.genres else "All" }}
+            | 
+            {% if defaults.region_isos %}
+                Region {{ defaults.region_isos }}
+              {% else %}
+                {% set glist = (defaults.genres or "").split(",") if defaults.genres else [] %}
+                {% if glist|length == 0 %}
+                  Genres All
+                {% else %}
+                  Genres {{ glist[:8] | join(", ") }}{% if glist|length > 8 %} (+{{ glist|length - 8 }}){% endif %}
+                {% endif %}
+              {% endif %}
             |
             Artists {{ defaults.artists if defaults.artists else "All" }}
           </span>
@@ -539,5 +568,6 @@
 
   <!-- Spotify integration -->
   <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
+
 </body>
 </html>

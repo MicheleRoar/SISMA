@@ -181,7 +181,7 @@ class PlaylistRecommender:
     - Feature expansion NEXT (non-tempo first, tempo last)    [optional]
     - Optional universe builder + big style pool builder (for Planner)
 
-    IMPORTANT: for Planner, you typically want:
+    IMPORTANT: for Planner:
       - strict_semantics=True  (no genre widening / no semantic drift)
       - lock_tempo=True        (tempo is HARD, never expanded)
     """
@@ -237,17 +237,16 @@ class PlaylistRecommender:
                 idx = np.intersect1d(idx, np.asarray(genre_idx, dtype=np.int64))
 
         # -----------------------------
-        # HARD exclusions
+        # HARD exclusions (robust, token-safe)
         # -----------------------------
-        if exclude_artists:
-            mask = ~df.iloc[idx]["artists"].isin(exclude_artists)
-            idx = idx[mask.values]
-
-        if exclude_genres:
-            mask = ~df.iloc[idx]["track_genre"].isin(exclude_genres)
-            idx = idx[mask.values]
+        idx = self._apply_exclusions(
+            idx,
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+        )
 
         return idx
+
 
     def __init__(self, store: DataStore, config: Optional[RecommenderConfig] = None):
         self.store = store
@@ -278,228 +277,80 @@ class PlaylistRecommender:
                 w[self._feat_idx[f]] = float(val)
         return w
 
+
     # -----------------------------
-    # Public API
+    # NEW: pool -> include/exclude -> recommend
     # -----------------------------
-    def recommend(
+
+    def recommend_from_pool(
         self,
-        user_input: Dict[str, float],
-        genre: str = "",
-        k: Optional[int] = None,
-        max_per_artist: Optional[int] = None,
-        exclude_track_ids: Optional[set] = None,
-        shuffle_within_top: bool = False,
-        random_state: int = 42,
-        allow_explicit: bool = False,
-        dontcare: Optional[Dict[str, bool]] = None,
-        weight_overrides: Optional[Dict[str, float]] = None,
-        ranges: Optional[Dict[str, Tuple[Optional[float], Optional[float]]]] = None,
-        exclude_artists: Optional[List[str]] = None,
-        exclude_genres: Optional[List[str]] = None,
         *,
-        # NEW: Planner controls
-        strict_semantics: bool = False,
-        lock_tempo: bool = False,
-    ) -> pd.DataFrame:
-        """
-        strict_semantics=True:
-          - no genre widening; range fallback never changes the semantic universe
-        lock_tempo=True:
-          - tempo is HARD; fallback never expands tempo range
-        """
-        k = int(k or self.config.k)
-        max_per_artist = int(max_per_artist or self.config.max_per_artist)
-        exclude_track_ids = exclude_track_ids or set()
-        ranges = ranges or {}
-
-        # 1) HARD candidate universe (Discovery)
-        idx = self._build_candidate_index(
-        genre=genre,
-        ranges=ranges,
-        exclude_artists=exclude_artists,
-        exclude_genres=exclude_genres,
-        strict_semantics=strict_semantics,
-        lock_tempo=lock_tempo,
-        )
-
-        # 2) explicit filter (still HARD, but applied ONCE)
-        idx = self._filter_explicit_indices(idx, allow_explicit=allow_explicit)
-
-        # 2) range engine with CONTROLLED fallback:
-        target_ranges = self._normalize_ranges(ranges)
-        expanded_ranges_finite = None
-        if target_ranges:
-            if strict_semantics:
-                # no genre widening; only feature expansion (and maybe tempo locked)
-                idx, expanded_ranges_finite = self._filter_with_controlled_fallback_no_genre(
-                    idx=idx,
-                    target_ranges=target_ranges,
-                    k=k,
-                    lock_tempo=lock_tempo,
-                )
-            else:
-                # legacy behavior: may widen genre query + expand features
-                idx, expanded_ranges_finite = self._filter_with_controlled_fallback(
-                    idx=idx,
-                    genre_query=genre,
-                    target_ranges=target_ranges,
-                    k=k,
-                    allow_explicit=allow_explicit,
-                    lock_tempo=lock_tempo,
-                )
-
-        # 3) distance target: for ranged features use midpoint
-        user_input = dict(user_input or {})
-        for f, (mn, mx) in target_ranges.items():
-            if mn is not None and mx is not None:
-                user_input[f] = float(0.5 * (mn + mx))
-
-        u_scaled = self._user_vector_scaled(user_input)
-
-        # per-request weights
-        w = self.w.copy()
-        if weight_overrides:
-            for f, val in weight_overrides.items():
-                if f in self._feat_idx:
-                    w[self._feat_idx[f]] = float(val)
-        if dontcare:
-            for f, flag in dontcare.items():
-                if flag and f in self._feat_idx:
-                    w[self._feat_idx[f]] = 0.0
-
-        # distances
-        d = self._weighted_distance(self.X[idx], u_scaled, w)
-
-        if shuffle_within_top:
-            rng = np.random.default_rng(random_state)
-            d = d + rng.normal(loc=0.0, scale=1e-4, size=d.shape).astype(np.float32)
-
-        pool_size = min(len(idx), max(k * self.config.pool_multiplier, self.config.min_pool))
-        top_pool_local = self._topk_indices(d, pool_size)
-        top_pool_global = idx[top_pool_local]
-        if shuffle_within_top:
-            rng = np.random.default_rng(random_state)
-            rng.shuffle(top_pool_global)
-
-        selected = self._apply_constraints(
-            top_pool_global,
-            k=k,
-            max_per_artist=max_per_artist,
-            exclude_track_ids=exclude_track_ids,
-            artist_caps=None,
-        )
-
-        cols = []
-        for c in ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity", "genres_list", "genres_str"]:
-            if c in self.df.columns:
-                cols.append(c)
-
-        out = self.df.iloc[selected][cols].copy()
-        if "artists" in out.columns:
-            out["artists"] = out["artists"].apply(normalize_artists_field)
-        out["track_genre"] = out.apply(two_genres_from_row, axis=1)
-
-        # --- BPM (integer) ---
-        if "tempo" in self.df.columns:
-            sel = np.asarray(selected, dtype=np.int64)
-            out["bpm"] = (
-                pd.to_numeric(self.df.iloc[sel]["tempo"], errors="coerce")
-                .round()
-                .astype("Int64")
-                .to_numpy()
-            )
-
-        # --- MATCH ---
-        sel_local_mask = np.isin(top_pool_global, selected)
-        sel_d = d[top_pool_local][sel_local_mask]
-        p10, p90 = np.percentile(d[top_pool_local], [10, 90])
-        denom = (p90 - p10) if (p90 - p10) > 1e-9 else 1.0
-        match_dist = 100.0 * (1.0 - np.clip((sel_d - p10) / denom, 0.0, 1.0))
-
-        if target_ranges and expanded_ranges_finite is not None and len(selected) > 0:
-            match_range = self._range_score_playlist_100(selected, target_ranges, expanded_ranges_finite)
-            match = 0.75 * match_range + 0.25 * match_dist
-        else:
-            match = match_dist
-
-        out["match"] = np.round(match, 2).astype(float)
-
-        if "popularity" in out.columns:
-            out["popularity"] = pd.to_numeric(out["popularity"], errors="coerce").fillna(0)
-            out = out.sort_values(["popularity", "match"], ascending=[False, False])
-        else:
-            out = out.sort_values("match", ascending=False)
-
-        return out.reset_index(drop=True)
-
-    def recommend_bucketed(
-        self,
         user_input: Dict[str, float],
-        *,
-        artist_buckets: Optional[List[str]] = None,
-        genre_buckets: Optional[List[str]] = None,
-        artist_weights: Optional[List[float]] = None,
-        genre_weights: Optional[List[float]] = None,
+        pool_idx: np.ndarray,
         k: int = 50,
-        allow_explicit: bool = False,
         max_per_artist: int = 2,
         exclude_track_ids: Optional[set] = None,
-        shuffle_within_top: bool = False,
+        allow_explicit: bool = False,
+        shuffle_within_top: bool = True,
         random_state: int = 42,
         weight_overrides: Optional[Dict[str, float]] = None,
         dontcare: Optional[Dict[str, bool]] = None,
-        fallback: bool = True,
-        ranges: Optional[Dict[str, Tuple[Optional[float], Optional[float]]]] = None,
+        include_artists: Optional[List[str]] = None,
+        include_genres: Optional[List[str]] = None,
+        include_mode: str = "prefer",   # "must" | "prefer"
+        prefer_strength: float = 0.18,  # (non usato nel two-pass, tenuto per compatibilità)
         exclude_artists: Optional[List[str]] = None,
         exclude_genres: Optional[List[str]] = None,
-        # NEW: Planner controls
-        strict_semantics: bool = False,
-        lock_tempo: bool = False,
     ) -> pd.DataFrame:
-        """
-        NOTE:
-          - bucketed already uses explicit buckets; no genre widening is performed here.
-          - lock_tempo=True => tempo is HARD (never expanded) when ranges are used.
-        """
-
         exclude_track_ids = exclude_track_ids or set()
-        artist_buckets = [str(a).strip() for a in (artist_buckets or []) if str(a).strip()]
-        genre_buckets = [str(g).strip() for g in (genre_buckets or []) if str(g).strip()]
-        k = int(k)
-        max_per_artist = int(max_per_artist)
+        include_artists = [str(x).strip() for x in (include_artists or []) if str(x).strip()]
+        include_genres = [str(x).strip() for x in (include_genres or []) if str(x).strip()]
+        exclude_artists = [str(x).strip() for x in (exclude_artists or []) if str(x).strip()]
+        exclude_genres = [str(x).strip() for x in (exclude_genres or []) if str(x).strip()]
 
+        idx = np.asarray(pool_idx, dtype=np.int64)
+        if idx.size == 0:
+            return pd.DataFrame()
 
-        # --- DISCOVERY SAFETY BELT (bucketed) ---
-        # If the user selected genre buckets, NEVER leave that genre universe.
-        allowed_genre_idx = None
-        if strict_semantics and genre_buckets:
-            parts = []
-            for g in genre_buckets:
-                gi = self.store.get_row_indices_by_genre(g)
-                if gi is not None and len(gi) > 0:
-                    parts.append(np.asarray(gi, dtype=np.int64))
-            if parts:
-                allowed_genre_idx = np.unique(np.concatenate(parts))
+        # HARD: explicit + exclusions
+        idx = self._filter_explicit_indices(idx, allow_explicit=allow_explicit)
+        idx = self._apply_exclusions(idx, exclude_artists=exclude_artists, exclude_genres=exclude_genres)
+        if idx.size == 0:
+            return pd.DataFrame()
 
-        if artist_buckets:
-            if not artist_weights or len(artist_weights) != len(artist_buckets):
-                artist_weights = [1.0] * len(artist_buckets)
-        else:
-            artist_weights = []
+        # helper: union indices for included artists/genres (global indices)
+        def _union_artist_idx(names: List[str]) -> np.ndarray:
+            if not names:
+                return np.array([], dtype=np.int64)
+            parts = [self._indices_by_artist_contains(a) for a in names]
+            return np.unique(np.concatenate(parts).astype(np.int64)) if parts else np.array([], dtype=np.int64)
 
-        if genre_buckets:
-            if not genre_weights or len(genre_weights) != len(genre_buckets):
-                genre_weights = [1.0] * len(genre_buckets)
-        else:
-            genre_weights = []
+        def _union_genre_idx(names: List[str]) -> np.ndarray:
+            if not names:
+                return np.array([], dtype=np.int64)
+            parts = [self._indices_by_genre_contains(g) for g in names]
+            return np.unique(np.concatenate(parts).astype(np.int64)) if parts else np.array([], dtype=np.int64)
 
-        ranges = ranges or {}
-        target_ranges = self._normalize_ranges(ranges)
+        inc_mode = (include_mode or "prefer").strip().lower()
+        if inc_mode not in {"must", "prefer"}:
+            inc_mode = "prefer"
 
+        inc_artist_idx = _union_artist_idx(include_artists)
+        inc_genre_idx = _union_genre_idx(include_genres)
+
+        # include_mode="must": HARD filter inside pool
+        if inc_mode == "must":
+            if include_artists:
+                idx = np.intersect1d(idx, inc_artist_idx)
+                if idx.size == 0:
+                    return pd.DataFrame()
+            if include_genres:
+                idx = np.intersect1d(idx, inc_genre_idx)
+                if idx.size == 0:
+                    return pd.DataFrame()
+
+        # build user vector + request weights
         user_input = dict(user_input or {})
-        for f, (mn, mx) in target_ranges.items():
-            if mn is not None and mx is not None:
-                user_input[f] = float(0.5 * (mn + mx))
         u_scaled = self._user_vector_scaled(user_input)
 
         w_req = self.w.copy()
@@ -512,123 +363,72 @@ class PlaylistRecommender:
                 if flag and f in self._feat_idx:
                     w_req[self._feat_idx[f]] = 0.0
 
-        selected_global: List[int] = []
-        selected_tid: set = set(exclude_track_ids)
+        # --- prefer (two-pass) ---
+        pref_mask = np.zeros(idx.size, dtype=bool)
+        if include_artists:
+            pref_mask |= np.isin(idx, inc_artist_idx)
+        if include_genres:
+            pref_mask |= np.isin(idx, inc_genre_idx)
 
-        def pick_from_candidates(
-            candidate_idx: np.ndarray,
-            need: int,
-            *,
-            artist_caps: Optional[Dict[str, int]] = None,
-        ) -> Tuple[List[int], Optional[Dict[str, Tuple[float, float]]]]:
-            candidate_idx = self._filter_explicit_indices(candidate_idx, allow_explicit=allow_explicit)
-            candidate_idx = self._apply_exclusions(
-                candidate_idx,
-                exclude_artists=exclude_artists,
-                exclude_genres=exclude_genres,
-            )
+        if inc_mode == "prefer" and (include_artists or include_genres):
+            idx_pref = idx[pref_mask]
+            idx_rest = idx[~pref_mask]
+        else:
+            idx_pref = np.array([], dtype=np.int64)
+            idx_rest = idx
 
-            # --- SAFETY BELT: NEVER leave genre universe in strict mode ---
-            if allowed_genre_idx is not None:
-                candidate_idx = np.intersect1d(
-                    np.asarray(candidate_idx, dtype=np.int64),
-                    allowed_genre_idx,
-                )
+        def pick_from(local_idx: np.ndarray, need: int, already_picked: Optional[np.ndarray] = None) -> List[int]:
+            if need <= 0 or local_idx.size == 0:
+                return []
+            if already_picked is not None and already_picked.size:
+                local_idx = local_idx[~np.isin(local_idx, already_picked)]
+                if local_idx.size == 0:
+                    return []
 
-            if need <= 0 or candidate_idx.size == 0:
-                return [], None
+            dloc = self._weighted_distance(self.X[local_idx], u_scaled, w_req)
 
-            expanded_ranges_finite = None
-            if target_ranges:
-                candidate_idx, expanded_ranges_finite = self._filter_with_controlled_fallback_no_genre(
-                    idx=candidate_idx,
-                    target_ranges=target_ranges,
-                    k=need,
-                    lock_tempo=lock_tempo,
-                )
-
-            d = self._weighted_distance(self.X[candidate_idx], u_scaled, w_req)
             if shuffle_within_top:
                 rng = np.random.default_rng(random_state)
-                d = d + rng.normal(0.0, 1e-4, size=d.shape).astype(np.float32)
+                dloc = dloc + rng.normal(loc=0.0, scale=1e-4, size=dloc.shape).astype(np.float32)
 
-            pool_size = min(len(candidate_idx), max(need * 15, self.config.min_pool))
-            top_local = self._topk_indices(d, pool_size)
-            top_global = candidate_idx[top_local]
+            pool_size = min(len(local_idx), max(int(need) * self.config.pool_multiplier, self.config.min_pool))
+            top_local = self._topk_indices(dloc, pool_size)
+            top_global = local_idx[top_local]
 
-            picked = self._apply_constraints(
+            if shuffle_within_top:
+                rng = np.random.default_rng(random_state)
+                rng.shuffle(top_global)
+
+            return self._apply_constraints(
                 top_global,
-                k=need,
-                max_per_artist=max_per_artist,
-                exclude_track_ids=selected_tid,
-                artist_caps=artist_caps,
+                k=int(need),
+                max_per_artist=int(max_per_artist),
+                exclude_track_ids=set(exclude_track_ids),
+                artist_caps=None,
             )
-            return picked, expanded_ranges_finite
 
-        buckets: List[Dict[str, str]] = []
-        weights: List[float] = []
+        selected: List[int] = []
+        picked1 = pick_from(idx_pref, int(k))
+        selected.extend(picked1)
 
-        for a, w in zip(artist_buckets, artist_weights):
-            buckets.append({"type": "artist", "name": a})
-            weights.append(float(w))
+        remaining = int(k) - len(selected)
+        if remaining > 0:
+            picked2 = pick_from(idx_rest, remaining, already_picked=np.asarray(selected, dtype=np.int64))
+            selected.extend(picked2)
 
-        for g, w in zip(genre_buckets, genre_weights):
-            buckets.append({"type": "genre", "name": g})
-            weights.append(float(w))
+        if not selected:
+            return pd.DataFrame()
 
-        last_expanded = None
+        cols = [c for c in ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity", "genres_list", "genres_str"]
+                if c in self.df.columns]
+        out = self.df.iloc[np.asarray(selected, dtype=np.int64)][cols].copy()
 
-        if not buckets:
-            cand = np.arange(len(self.df), dtype=np.int64)
-            picked, last_expanded = pick_from_candidates(cand, k, artist_caps=None)
-            selected_global.extend(picked)
-        else:
-            quotas = self._allocate_quotas(k, weights)
-            for b, q in zip(buckets, quotas):
-                if q <= 0:
-                    continue
-
-                if b["type"] == "artist":
-                    cand = self._indices_by_artist_contains(b["name"])
-                    caps = {b["name"].strip().lower(): int(q)}
-                    picked, last_expanded = pick_from_candidates(cand, q, artist_caps=caps)
-                else:
-                    cand = self._indices_by_genre_contains(b["name"])
-                    picked, last_expanded = pick_from_candidates(cand, q, artist_caps=None)
-
-                for ii in picked:
-                    tid = str(self.df.iloc[int(ii)].get("track_id", "")).strip()
-                    if tid:
-                        selected_tid.add(tid)
-                selected_global.extend(picked)
-
-            remaining = k - len(selected_global)
-            if remaining > 0 and fallback:
-                if allowed_genre_idx is not None:
-                    cand = allowed_genre_idx
-                else:
-                    cand = np.arange(len(self.df), dtype=np.int64)
-
-                picked, last_expanded = pick_from_candidates(
-                    cand,
-                    remaining,
-                    artist_caps=None,
-                )
-                selected_global.extend(picked)
-
-        cols = []
-        for c in ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity", "genres_list", "genres_str"]:
-            if c in self.df.columns:
-                cols.append(c)
-
-        out = self.df.iloc[selected_global][cols].copy()
         if "artists" in out.columns:
             out["artists"] = out["artists"].apply(normalize_artists_field)
         out["track_genre"] = out.apply(two_genres_from_row, axis=1)
 
-        # --- BPM (integer) ---
         if "tempo" in self.df.columns:
-            sel = np.asarray(selected_global, dtype=np.int64)
+            sel = np.asarray(selected, dtype=np.int64)
             out["bpm"] = (
                 pd.to_numeric(self.df.iloc[sel]["tempo"], errors="coerce")
                 .round()
@@ -636,25 +436,27 @@ class PlaylistRecommender:
                 .to_numpy()
             )
 
-        if target_ranges and last_expanded is not None and len(selected_global) > 0:
-            match_range = self._range_score_playlist_100(selected_global, target_ranges, last_expanded)
-            sel_idx = np.array(selected_global, dtype=np.int64)
-            d_sel = self._weighted_distance(self.X[sel_idx], u_scaled, w_req)
-            dmin = float(np.min(d_sel)) if len(d_sel) else 0.0
-            dmax = float(np.max(d_sel)) if len(d_sel) else 1.0
-            denom = (dmax - dmin) if (dmax - dmin) > 1e-9 else 1.0
-            match_dist = 100.0 * (1.0 - (d_sel - dmin) / denom)
-            out["match"] = np.round(0.75 * match_range + 0.25 * match_dist, 2)
-        else:
-            out["match"] = 0.0
+        # ---- MATCH (distance-based, 0..100) ----
+        sel = np.asarray(selected, dtype=np.int64)
 
-        if "popularity" in out.columns:
-            out["popularity"] = pd.to_numeric(out["popularity"], errors="coerce").fillna(0)
-            out = out.sort_values(["popularity", "match"], ascending=[False, False])
-        else:
-            out = out.sort_values("match", ascending=False)
+        d_all = self._weighted_distance(self.X[idx], u_scaled, w_req)
 
-        return out.head(k).reset_index(drop=True)
+        # mappa global_index -> posizione in idx
+        idx_pos = {int(g): i for i, g in enumerate(idx.tolist())}
+        sel_pos = np.array([idx_pos[int(g)] for g in sel if int(g) in idx_pos], dtype=np.int64)
+
+        d_sel = d_all[sel_pos]
+
+        p10, p90 = np.percentile(d_all, [10, 90])
+        den = (p90 - p10) if (p90 - p10) > 1e-9 else 1.0
+        match = 100.0 * (1.0 - np.clip((d_sel - p10) / den, 0.0, 1.0))
+        out["match"] = np.round(match, 2).astype(float)
+
+        return out.reset_index(drop=True)
+
+
+
+
 
     # -----------------------------
     # Range engine + Controlled fallback (core)
@@ -817,104 +619,7 @@ class PlaylistRecommender:
 
         return (100.0 * (score / float(wsum))).astype(np.float32)
 
-    # ---- genre widening (legacy) ----
-    @staticmethod
-    def _tokenize_genre_query(q: str) -> List[str]:
-        s = (q or "").strip().lower()
-        if not s:
-            return []
-        parts = [p.strip() for p in s.replace("/", " ").replace("-", " ").split() if p.strip()]
-        return [p for p in parts if len(p) >= 3]
-
-    def _genre_variants(self, q: str) -> List[str]:
-        base = (q or "").strip()
-        if not base:
-            return [""]
-
-        toks = self._tokenize_genre_query(base)
-        out: List[str] = [base]
-
-        if len(toks) >= 2:
-            for i in range(len(toks)):
-                v = " ".join([toks[j] for j in range(len(toks)) if j != i]).strip()
-                if v:
-                    out.append(v)
-
-        for t in toks:
-            out.append(t)
-
-        seen = set()
-        uniq: List[str] = []
-        for x in out:
-            xx = str(x).strip().lower()
-            if xx and xx not in seen:
-                seen.add(xx)
-                uniq.append(str(x).strip())
-        return uniq
-
-    def _filter_with_controlled_fallback(
-        self,
-        *,
-        idx: np.ndarray,
-        genre_query: str,
-        target_ranges: Dict[str, Tuple[Optional[float], Optional[float]]],
-        k: int,
-        allow_explicit: bool,
-        lock_tempo: bool = False,
-    ) -> Tuple[np.ndarray, Dict[str, Tuple[float, float]]]:
-        """
-        LEGACY path:
-          1) strict ranges on current idx
-          2) genre widening via variants
-          3) feature expansion (tempo last, unless lock_tempo=True)
-        """
-        strict = self._filter_by_ranges(idx, target_ranges)
-        if strict.size >= int(k):
-            exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in target_ranges.items()}
-            return strict, exp_for_score
-
-        widened = np.asarray(idx, dtype=np.int64)
-        for gv in self._genre_variants(genre_query):
-            gi = self.store.get_row_indices_by_genre(gv)
-            gi = self._filter_explicit_indices(gi, allow_explicit=allow_explicit)
-            widened = np.unique(np.concatenate([widened, gi]).astype(np.int64))
-            strict2 = self._filter_by_ranges(widened, target_ranges)
-            if strict2.size >= int(k):
-                exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in target_ranges.items()}
-                return strict2, exp_for_score
-
-        expanded_idx, exp_for_score = self._filter_with_controlled_feature_expansion(
-            idx=widened,
-            target_ranges=target_ranges,
-            k=k,
-            lock_tempo=lock_tempo,
-        )
-        return expanded_idx, exp_for_score
-
-    def _filter_with_controlled_fallback_no_genre(
-        self,
-        *,
-        idx: np.ndarray,
-        target_ranges: Dict[str, Tuple[Optional[float], Optional[float]]],
-        k: int,
-        lock_tempo: bool = False,
-    ) -> Tuple[np.ndarray, Dict[str, Tuple[float, float]]]:
-        """
-        Planner-safe path:
-          1) strict ranges on current idx
-          2) ONLY feature expansion (tempo expansion disabled if lock_tempo=True)
-        """
-        strict = self._filter_by_ranges(idx, target_ranges)
-        if strict.size >= int(k):
-            exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in target_ranges.items()}
-            return strict, exp_for_score
-
-        return self._filter_with_controlled_feature_expansion(
-            idx=idx,
-            target_ranges=target_ranges,
-            k=k,
-            lock_tempo=lock_tempo,
-        )
+ 
 
     def _filter_with_controlled_feature_expansion(
         self,
@@ -1020,27 +725,6 @@ class PlaylistRecommender:
     def _indices_by_genre_contains(self, genre_query: str) -> np.ndarray:
         return self.store.get_row_indices_by_genre(genre_query)
 
-    @staticmethod
-    def _allocate_quotas(k: int, weights: List[float]) -> List[int]:
-        w = np.array([max(0.0, float(x)) for x in (weights or [])], dtype=np.float64)
-        if w.size == 0:
-            return []
-        if w.sum() <= 0:
-            w = np.ones_like(w)
-        w = w / w.sum()
-
-        raw = w * int(k)
-        base = np.floor(raw).astype(int)
-        rem = int(k) - int(base.sum())
-        if rem <= 0:
-            return base.tolist()
-
-        frac = raw - base
-        order = np.argsort(-frac)
-        for i in range(rem):
-            base[int(order[i % len(order)])] += 1
-
-        return base.tolist()
 
     def _filter_explicit_indices(self, idx: np.ndarray, allow_explicit: bool) -> np.ndarray:
         if allow_explicit:
@@ -1241,7 +925,7 @@ class PlaylistRecommender:
 
         expanded_ranges_finite = None
         if target_ranges:
-            idx, expanded_ranges_finite = self._filter_with_controlled_fallback_no_genre(
+            idx, expanded_ranges_finite = self._filter_with_controlled_feature_expansion(
                 idx=idx,
                 target_ranges=target_ranges,
                 k=pool_size,
@@ -1283,6 +967,8 @@ class PlaylistRecommender:
 
         cols = [c for c in ["track_id", "track_name", "artists", "album_name", "popularity", "genres_list", "genres_str"] if c in self.df.columns]
         out = self.df.iloc[top_global][cols].copy()
+        out["_row_idx"] = top_global 
+
         if "artists" in out.columns:
             out["artists"] = out["artists"].apply(normalize_artists_field)
         out["track_genre"] = out.apply(two_genres_from_row, axis=1)
@@ -1315,117 +1001,3 @@ class PlaylistRecommender:
             out = out.sort_values("match", ascending=False)
 
         return out.reset_index(drop=True)
-
-
-# -------------------------------------------------------------------
-# Legacy “stable API” (kept as-is; not used by PlaylistRecommender)
-# -------------------------------------------------------------------
-def _coerce_range_for_column(df: pd.DataFrame, col: str, v: float) -> float:
-    """
-    Se la colonna è in [0,1] ma il preset usa 0..100, convertiamo.
-    Se la colonna è in scala 'normale', lasciamo stare.
-    """
-    if col not in df.columns:
-        return v
-    s = df[col]
-    try:
-        mx = float(np.nanmax(s.values))
-    except Exception:
-        return v
-
-    # tipico: danceability/energy/valence ecc sono 0..1
-    if mx <= 1.5 and v > 1.5:
-        return v / 100.0
-    return v
-
-
-def _apply_minmax(df: pd.DataFrame, col: str, vmin: Optional[float], vmax: Optional[float]) -> pd.DataFrame:
-    if col not in df.columns:
-        return df
-    if vmin is not None:
-        df = df[df[col] >= vmin]
-    if vmax is not None:
-        df = df[df[col] <= vmax]
-    return df
-
-
-def recommend_tracks(store, params: Dict[str, Any], k: int = 50, seed: Optional[int] = 7) -> List[Dict[str, Any]]:
-    """
-    API "stabile" per Planner (legacy):
-    - store: DataStore con df_clean (o df)
-    - params: dict tipo PRESETS[preset] con chiavi *_min / *_max (tempo_min, energy_min, ...)
-    - k: numero brani
-    Ritorna lista di dict con almeno track_name/artists/tempo/track_genre/track_id se disponibili.
-    """
-    df = None
-    if hasattr(store, "df_clean"):
-        df = store.df_clean
-    elif hasattr(store, "df"):
-        df = store.df
-    else:
-        raise RuntimeError("DataStore non espone df_clean/df")
-
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return []
-
-    x = df.copy()
-
-    key2col = {
-        "tempo": "tempo",
-        "energy": "energy",
-        "danceability": "danceability",
-        "valence": "valence",
-        "instrumentalness": "instrumentalness",
-        "acousticness": "acousticness",
-        "liveness": "liveness",
-        "speechiness": "speechiness",
-        "loudness": "loudness",
-        "popularity": "popularity",
-    }
-
-    for key, col in key2col.items():
-        vmin = params.get(f"{key}_min", None)
-        vmax = params.get(f"{key}_max", None)
-
-        if vmin is not None:
-            vmin = _coerce_range_for_column(x, col, float(vmin))
-        if vmax is not None:
-            vmax = _coerce_range_for_column(x, col, float(vmax))
-
-        x = _apply_minmax(x, col, vmin, vmax)
-
-    if x.empty:
-        x = df.copy()
-
-    rng = np.random.default_rng(seed)
-    if "popularity" in x.columns:
-        noise = rng.normal(0, 1, size=len(x))
-        x = x.assign(_score=x["popularity"].fillna(0).astype(float) + noise)
-        x = x.sort_values("_score", ascending=False)
-    else:
-        x = x.sample(frac=1.0, random_state=seed)
-
-    out_df = x.head(int(k)).copy()
-
-    def pick(row, *names, default=""):
-        for n in names:
-            if n in row and pd.notna(row[n]):
-                return row[n]
-        return default
-
-    out: List[Dict[str, Any]] = []
-    for _, row in out_df.iterrows():
-        out.append({
-            "track_id": pick(row, "track_id", "id", default=None),
-            "track_name": pick(row, "track_name", "title", default=""),
-            "artists": pick(row, "artists", "artist", default=""),
-            "tempo": float(pick(row, "tempo", default=np.nan)) if "tempo" in out_df.columns else None,
-            "track_genre": pick(row, "track_genre", "genre", default=""),
-            "popularity": float(pick(row, "popularity", default=np.nan)) if "popularity" in out_df.columns else None,
-            "duration_ms": float(pick(row, "duration_ms", default=np.nan)) if "duration_ms" in out_df.columns else None,
-        })
-    return out
-
-
-def build_playlist(store, params: Dict[str, Any], k: int = 50, seed: Optional[int] = 7):
-    return recommend_tracks(store, params=params, k=k, seed=seed)
