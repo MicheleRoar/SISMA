@@ -51,8 +51,6 @@ The Discovery engine generates feature-consistent playlists based on:
 
 ![Discovery -- Feature Sliders](docs/images/discovery_features.png)
 
-![Discovery -- Full Interface](docs/images/discovery_full.png)
-
 ### Core Logic
 
 The engine works in progressive filtering steps:
