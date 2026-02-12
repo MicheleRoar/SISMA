@@ -142,6 +142,25 @@ def _get_selected_buckets_from_request():
     )
 
 
+def _parse_isos(raw: str) -> List[str]:
+    return [x.strip().upper() for x in (raw or "").split(",") if x.strip()]
+
+def _region_genres_union(isos: List[str], top_n: int = 120) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for iso in isos:
+        payload = get_region_payload(iso=iso, key=None, top_n=top_n)
+        if not payload.get("ok"):
+            continue
+        for g in (payload.get("genres") or []):
+            gs = str(g).strip()
+            if gs and gs not in seen:
+                seen.add(gs)
+                out.append(gs)
+    return out
+
+
+
 def _sort_and_dedup(playlist_df: pd.DataFrame) -> pd.DataFrame:
     if playlist_df is None or len(playlist_df) == 0:
         return playlist_df
@@ -337,7 +356,6 @@ def generate():
     track_id = (request.args.get("track_id") or "").strip()
     region_isos_raw = (request.args.get("region_isos") or "").strip()
 
-
     (
         artists,
         genres_list,
@@ -350,10 +368,30 @@ def generate():
         exclude_genres_raw,
     ) = _get_selected_buckets_from_request()
 
+    # ---- region merge (NO UI overwrite) ----
+    top_n = request.args.get("top_n", type=int) or 120  # safe default
+    region_isos = _parse_isos(region_isos_raw)
+    region_genres = _region_genres_union(region_isos, top_n=top_n) if region_isos else []
+
+    # include_genres final = manual + region (dedup), manual first
+    include_genres_final: List[str] = []
+    seen = set()
+
+    for g in genres_list:
+        if g and g not in seen:
+            include_genres_final.append(g)
+            seen.add(g)
+
+    for g in region_genres:
+        if g and g not in seen:
+            include_genres_final.append(g)
+            seen.add(g)
+
     artist_weights_raw = (request.args.get("artist_weights") or "").strip()
     weights_dict = _parse_artist_weights_param(artist_weights_raw)
 
     bucket_count = len(artists) + len(genres_list)
+
 
     # ----------------------------
     # RANGE PARSING (NEW)
@@ -460,7 +498,7 @@ def generate():
             k=50,
             max_per_artist=2,
             include_artists=artists,
-            include_genres=genres_list,
+            include_genres=include_genres_final,
             include_mode="prefer",          # DISCOVERY: adding "pop" must not shrink the pool
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
@@ -562,7 +600,7 @@ def generate():
         k=50,
         max_per_artist=2,
         include_artists=artists,
-        include_genres=genres_list,
+        include_genres=include_genres_final,
         include_mode="prefer",          # discovery behavior: don't shrink pool
         exclude_artists=exclude_artists,
         exclude_genres=exclude_genres,

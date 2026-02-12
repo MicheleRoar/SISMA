@@ -505,14 +505,6 @@
     }
 
     function renderChips() {
-      const regionEl = document.getElementById("region_isos");
-      const regionOn = regionEl && String(regionEl.value || "").trim().length > 0;
-      if (regionOn) {
-        chips.innerHTML = "";
-        chips.style.display = "none";
-        return;
-      }
-
       const values = Array.from(selected.values());
       if (values.length === 0) {
         chips.innerHTML = "";
@@ -533,6 +525,7 @@
         })
         .join("");
     }
+
 
 
     function addGenre(name) {
@@ -1143,12 +1136,14 @@ async function fetchRegionGenres(iso) {
 // UI: status line
 // -----------------------------
 function updateRegionStatus() {
+  const clearBtn = document.getElementById("clear_region");
   const status = document.getElementById("region_status");
-  if (!status) return;
 
   const isos = Array.from(REGION_STATE.selected);
+
   if (isos.length === 0) {
-    status.textContent = "";
+    if (status) status.textContent = "";
+    if (clearBtn) clearBtn.textContent = "Clear";
     return;
   }
 
@@ -1156,10 +1151,16 @@ function updateRegionStatus() {
   const shown = labels.slice(0, 2);
   const extra = labels.length - shown.length;
 
-  status.textContent = extra > 0
-    ? `Regions: ${shown.join(", ")} (+${extra})`
-    : `Regions: ${shown.join(", ")}`;
+  const txt = extra > 0
+    ? `${shown.join(", ")} (+${extra})`
+    : `${shown.join(", ")}`;
+
+  if (status) status.textContent = `Regions: ${txt}`;
+  if (clearBtn) clearBtn.textContent = `Clear (${txt})`;
 }
+
+
+
 
 function isRegionMode() {
   return REGION_STATE.selected.size > 0;
@@ -1181,21 +1182,6 @@ function readRegionIsosHidden() {
 }
 
 
-// -----------------------------
-// Compute union genres and apply
-// -----------------------------
-function recomputeUnionGenresAndApply() {
-  const all = new Set();
-  for (const iso of REGION_STATE.selected) {
-    const gs = REGION_STATE.cache.get(iso) || [];
-    gs.forEach(g => all.add(g));
-  }
-
-  setIncludeGenres(Array.from(all), {
-    replace: true,
-    render: !REGION_STATE.suppressChips
-  });
-}
 
 // -----------------------------
 // Map coloring (JS-enforced)
@@ -1267,7 +1253,6 @@ async function onRegionClick(iso) {
 
       writeRegionIsosHidden();          
       updateRegionStatus();
-      recomputeUnionGenresAndApply();
       toggleGenreUIForRegionMode();     
       syncMapColorsWithSelection();
 
@@ -1294,7 +1279,6 @@ async function onRegionClick(iso) {
     await fetchRegionGenres(iso);
 
     updateRegionStatus();
-    recomputeUnionGenresAndApply();
     toggleGenreUIForRegionMode();
     syncMapColorsWithSelection();
 
@@ -1365,7 +1349,6 @@ async function onRegionClick(iso) {
   });
 })();
 
-
 function toggleGenreUIForRegionMode() {
   const chips = document.getElementById("genre_chips");
   const input = document.getElementById("genre_query");
@@ -1373,13 +1356,20 @@ function toggleGenreUIForRegionMode() {
 
   const on = isRegionMode();
 
-  if (chips) chips.style.display = on ? "none" : "";
-  if (sugg) sugg.style.display = "none"; // chiudi sempre
+  // Chips manuali SEMPRE visibili (sono l’unica cosa che vogliamo mostrare)
+  if (chips) chips.style.display = "";
+
+  // Input SEMPRE utilizzabile: l’utente può aggiungere "salsa" dopo aver cliccato IT
   if (input) {
-    input.disabled = on;                 // blocca input quando region-mode
-    input.placeholder = on ? "Controlled by Region selection" : "Add genre…";
+    input.disabled = false;
+    input.placeholder = on ? "Add genre… (regions also active)" : "Add genre…";
   }
+
+  // chiudi suggerimenti quando cambi modalità
+  if (sugg) sugg.style.display = "none";
 }
+
+
 
 (function restoreRegionSelectionFromHidden() {
   const isos = readRegionIsosHidden();
@@ -1396,7 +1386,6 @@ function toggleGenreUIForRegionMode() {
   // fetch generi per ciascuna regione e applica union
   Promise.all(isos.map(fetchRegionGenres))
     .then(() => {
-      recomputeUnionGenresAndApply();
       toggleGenreUIForRegionMode();
       syncMapColorsWithSelection();
     })
