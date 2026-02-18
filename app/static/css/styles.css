@@ -41,30 +41,6 @@ html[data-theme="light"]{
   --suggest-hover: rgba(0,0,0,0.04);
 }
 
-/* ===== Dark theme ===== */
-html[data-theme="dark"]{
-  --bg: #0b0d10;
-  --panel: #11151b;
-  --card: #0f1318;
-
-  --text: #e7eef7;
-  --muted:#9fb0c3;
-
-  --line: #222b35;
-  --line-soft: rgba(255,255,255,0.08);
-
-  --track: rgba(255,255,255,0.10);
-  --fill: rgba(255,255,255,0.85);
-  --thumb-bg:#ffffff;
-  --thumb-border: rgba(255,255,255,0.55);
-
-  --thead-bg:#000000;
-  --thead-text:#ffffff;
-
-  --hover: rgba(255,255,255,0.04);
-  --suggest-hover: rgba(255,255,255,0.06);
-}
-
 /* ===== Reset / base ===== */
 *{ box-sizing: border-box; }
 html, body{ height: 100%; }
@@ -450,6 +426,21 @@ select:focus, input:focus{
   z-index: 3;
 }
 
+/* Allow dragging both thumbs (min & max) even when overlapped */
+.range-wrap input[type="range"]{
+  pointer-events: none; /* track & body won't steal the drag */
+}
+
+/* re-enable interaction only on the thumb */
+.range-wrap input[type="range"]::-webkit-slider-thumb{
+  pointer-events: auto;
+}
+
+.range-wrap input[type="range"]::-moz-range-thumb{
+  pointer-events: auto;
+}
+
+
 /* Hide native tracks */
 .range-wrap input[type="range"]::-webkit-slider-runnable-track{
   height: var(--track-h);
@@ -703,3 +694,165 @@ button.btn[type="submit"]:hover,
   white-space: nowrap;
 }
 
+/* =========================================================
+   Advanced + Planner (side-by-side) — CLEAN + CONSISTENT
+   ========================================================= */
+
+:root{
+  --ctrl-h: 40px;
+  --ctrl-r: 10px;
+
+  --panel-b: rgba(0,0,0,0.08);
+  --panel-bg: rgba(0,0,0,0.02);
+
+  --wd-gap: 6px;
+}
+
+/* ---- layout: two details on one row ---- */
+.advanced-row{
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.advanced-row > details{
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- panels ---- */
+details.advanced,
+details.planner-advanced{
+  border: 1px solid var(--panel-b);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--panel-bg);
+}
+
+details.advanced summary,
+details.planner-advanced summary{
+  cursor: pointer;
+  font-weight: 700;
+  padding: 6px 4px;
+  user-select: none;
+}
+
+/* optional: remove default marker spacing */
+details.advanced summary::-webkit-details-marker,
+details.planner-advanced summary::-webkit-details-marker{
+  display: none;
+}
+
+/* ---- grid inside details ---- */
+details .grid-2{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
+  margin-top: 10px;
+}
+
+details .grid-2 .row{
+  display: flex;
+  flex-direction: column;
+}
+
+details .row label{
+  display: block;
+  margin-bottom: 6px;
+  margin-top: 10px;
+}
+
+/* ---- uniform controls (inputs/selects) ---- */
+details .row input[type="text"],
+details .row input[type="time"],
+details .row input[type="number"],
+details .row select{
+  width: 100%;
+  height: var(--ctrl-h);
+  border-radius: var(--ctrl-r);
+  box-sizing: border-box;
+}
+
+/* ---- Weekdays "control box" ---- */
+details.planner-advanced .weekday-toggles{
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--wd-gap);
+  align-items: center;
+
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: var(--ctrl-r);
+  padding: 6px;
+  min-height: var(--ctrl-h);
+  box-sizing: border-box;
+}
+
+details.planner-advanced .weekday-toggles .wd-btn{
+  height: 32px;
+  width: 53px;
+  padding: 0 10px;
+  border-radius: var(--ctrl-r);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform .08s ease, background .12s ease, border-color .12s ease;
+}
+details.planner-advanced .weekday-toggles .wd-btn:hover{ transform: translateY(-1px); }
+details.planner-advanced .weekday-toggles .wd-btn:active{ transform: translateY(0); }
+
+details.planner-advanced .weekday-toggles .wd-btn.active{
+  background: var(--accent);
+  border-color: transparent;
+  color: #000;
+}
+
+/* ---- Color field as full-width control ---- */
+details.planner-advanced .color-field{
+  width: 100%;
+  height: var(--ctrl-h);
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: var(--ctrl-r);
+  padding: 6px 10px;
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+details.planner-advanced .color-field input[type="color"]{
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+/* ---- Planner CTA spans both columns (THIS is the alignment fix) ---- */
+details.planner-advanced .planner-cta{
+  grid-column: 1 / -1;
+}
+
+details.planner-advanced #btn_add_to_planner{
+  width: 100%;
+  height: var(--ctrl-h);
+  border-radius: var(--ctrl-r);
+  font-weight: 900;
+  margin: 0;
+  align-self: stretch;
+
+}
+
+
+/* ---- responsive: stack panels ---- */
+@media (max-width: 980px){
+  .advanced-row{ flex-direction: column; }
+}
+
+details.planner-advanced .grid-2{
+  padding-left: 0;
+  padding-right: 0;
+}

@@ -317,9 +317,11 @@
 
 
 
-        <!-- ADVANCED -->
-        <details class="advanced">
-          <summary>Advanced options</summary>
+        <div class="advanced-row">
+
+          <!-- ADVANCED -->
+          <details class="advanced">
+            <summary>Advanced options</summary>
 
           <div class="grid-2">
 
@@ -437,7 +439,72 @@
             </div>
 
           </div>
-        </details>
+          </details>
+
+          <!-- PLANNER -->
+          <details class="advanced planner-advanced">
+            <summary>Planner mode</summary>
+
+            <div class="grid-2">
+
+              <div class="row">
+                <label><strong>Slot name</strong></label>
+                <input type="text" id="planner_slot_name" placeholder="e.g. Morning warm-up">
+              </div>
+
+              <div class="row">
+                <label><strong>Color</strong></label>
+                <div class="color-field">
+                  <input type="color" id="planner_color" value="#77dd77">
+                </div>
+              </div>
+
+              <div class="row">
+                <label><strong>Start time</strong></label>
+                <input type="time" id="planner_start" value="10:00">
+              </div>
+
+              <div class="row">
+                <label><strong>End time</strong></label>
+                <input type="time" id="planner_end" value="11:00">
+              </div>
+
+              <div class="row">
+                <label><strong>Weeks</strong></label>
+                <select id="planner_weeks">
+                  {% for w in range(1,9) %}
+                    <option value="{{ w }}" {% if w == 2 %}selected{% endif %}>{{ w }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="row">
+                <label><strong>Weekdays</strong></label>
+
+                <div id="planner_weekdayToggles" class="weekday-toggles">
+                  {% for wd,label in [(1,"Mon"),(2,"Tue"),(3,"Wed"),(4,"Thu"),(5,"Fri"),(6,"Sat"),(0,"Sun"), (7,"All")] %}
+                    <button type="button"
+                            class="wd-btn {% if wd in [1,2,3,4,5] %}active{% endif %}"
+                            data-wd="{{ wd }}">
+                      {{ label }}
+                    </button>
+                  {% endfor %}
+                </div>
+
+                <input type="hidden" name="planner_weekdays" id="planner_weekdays" value="1,2,3,4,5">
+              </div>
+
+
+              <div class="row planner-cta">
+                <button type="button" class="btn" id="btn_add_to_planner">Add to planner</button>
+              </div>
+
+            </div>
+
+          </details>
+
+        </div>
+
 
         <button class="btn" type="submit">Generate 50-song playlist</button>
 
@@ -545,7 +612,6 @@
     window.SISMA_TOP_GENRES = {{ genres|tojson }};
   </script>
 
-  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
   <script>
     // Build Download JSON link with current form parameters
@@ -566,8 +632,10 @@
     })();
   </script>
 
-  <!-- Spotify integration -->
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/discovery_to_planner.js') }}"></script>
   <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
 
 </body>
 </html>
+

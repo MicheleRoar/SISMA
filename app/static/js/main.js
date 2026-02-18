@@ -1396,3 +1396,923 @@ function toggleGenreUIForRegionMode() {
     });
 })();
 
+
+// --- Planner weekday toggles (Discovery page) ---
+(function () {
+  const host = document.getElementById("planner_weekdayToggles");
+  const hidden = document.getElementById("planner_weekdays");
+  if (!host || !hidden) return;
+
+  function getSelectedSet() {
+    return new Set(
+      String(hidden.value || "")
+        .split(",")
+        .map(x => parseInt(x.trim(), 10))
+        .filter(Number.isFinite)
+    );
+  }
+
+  function setSelectedSet(set) {
+    // fallback: non permettere set vuoto
+    if (set.size === 0) [1,2,3,4,5].forEach(x => set.add(x));
+
+    hidden.value = Array.from(set).sort((a,b)=>a-b).join(",");
+
+    // refresh UI
+    host.querySelectorAll(".wd-btn").forEach(btn => {
+      const v = parseInt(btn.dataset.wd, 10);
+      btn.classList.toggle("active", set.has(v));
+    });
+
+    // trigger per download link ecc.
+    const form = document.getElementById("playlist_form");
+    if (form) form.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // init: se hidden vuoto, usa stato dal template (active) oppure Mon-Fri
+  let selected = getSelectedSet();
+  if (selected.size === 0) {
+    const fromDom = new Set(
+      Array.from(host.querySelectorAll(".wd-btn.active"))
+        .map(b => parseInt(b.dataset.wd, 10))
+        .filter(Number.isFinite)
+    );
+    selected = fromDom.size ? fromDom : new Set([1,2,3,4,5]);
+  }
+  setSelectedSet(selected);
+
+  // click delegation
+  host.addEventListener("click", (e) => {
+    const btn = e.target.closest(".wd-btn");
+    if (!btn) return;
+    e.preventDefault();
+
+    const wd = parseInt(btn.dataset.wd, 10);
+    if (!Number.isFinite(wd)) return;
+
+    const next = getSelectedSet();
+    if (next.has(wd)) next.delete(wd);
+    else next.add(wd);
+
+    setSelectedSet(next);
+  });
+})();
+
+
+// app/static/js/planner.js
+(() => {
+  // ============================================================
+  // SISMA Planner — clean rewrite
+  //
+  // Goals (from our design):
+  // 1) Planner UI is mainly a calendar visualization (like dhtmlxScheduler vibe)
+  // 2) Parameters are chosen in Discovery, then sent to Planner as a "rule draft"
+  // 3) Planner rule adds: slot name, color, weekdays, weeks, time range
+  // 4) One rule can require generating MANY playlists (e.g., Mon–Fri x 2 weeks x 1h = 10 occurrences)
+  // 5) Generation must be deterministic per-day (seeded by dayISO) and supports cooldown (no repeats)
+  // 6) Use batch endpoint: /planner/api/generate_batch (preferred)
+  // 7) Keep localStorage persistence for now
+  // ============================================================
+
+  // ----------------------------
+  // Config
+  // ----------------------------
+  const START_DAY = "10:00";
+  const END_DAY   = "24:00";
+  const STEP_MIN  = 30;
+  const COLS      = 14; // 2 weeks view
+  const LS_KEY    = "sisma_planner_v2";
+
+  const DEFAULT_K = 50;
+  const DEFAULT_MAX_PER_ARTIST = 2;
+  const DEFAULT_COOLDOWN_DAYS = 2;
+
+  // How we pick which day's playlist to show when clicking a cell
+  // (we store playlists keyed by dayISO)
+  const WEEKDAY_IT = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
+
+  // ----------------------------
+  // DOM (calendar)
+  // ----------------------------
+  const daysHead = document.getElementById("daysHead");
+  const timeCol  = document.getElementById("timeCol");
+  const daysGrid = document.getElementById("daysGrid");
+
+  // ----------------------------
+  // DOM (rule controls on Planner page)
+  // (You can hide/show this panel depending on "coming from discovery")
+  // ----------------------------
+  const slotName  = document.getElementById("slotName");   // optional <input>
+  const slotPreset = document.getElementById("slotPreset"); // optional fallback if preset mode
+  const slotColor = document.getElementById("slotColor");
+  const swatchPreview = document.getElementById("swatchPreview");
+
+  const slotStart = document.getElementById("slotStart");
+  const slotEnd   = document.getElementById("slotEnd");
+
+  const weeksCount = document.getElementById("weeksCount"); // 1..8 (default 2)
+  const weekdayToggles = document.getElementById("weekdayToggles");
+
+  const btnApplyRule   = document.getElementById("btnGenerate");  // reusing your id
+  const btnResetPlan   = document.getElementById("btnResetPlan");
+  const btnGenerateAll = document.getElementById("btnGenerateAll"); // optional (create in HTML if you want)
+
+  // ----------------------------
+  // DOM (sidebar viewer)
+  // ----------------------------
+  const slotInfo = document.getElementById("slotInfo");
+  const slotPlaylistList = document.getElementById("slotPlaylistList");
+
+  // ----------------------------
+  // State
+  // ----------------------------
+  let rows = 0;
+  let startDate = null; // Monday of the visible 2-week window
+
+  // gridState[r][c] = null | { ruleId: "..." }
+  let gridState = [];
+
+  // rules: ruleId -> rule object
+  // rule = {
+  //   id, name, color, start, end, weeks, weekdays:[0..6],
+  //   // discovery payload (the real meat)
+  //   discovery: { ... },
+  //   // generation settings
+  //   k, max_per_artist, cooldown_days,
+  //   // playlists:
+  //   playlistsByDay: { "YYYY-MM-DD": tracks[] },
+  //   // reportByDay: { "YYYY-MM-DD": {...} } (optional)
+  // }
+  let rules = {};
+
+  // Selection (drag paint)
+  let isMouseDown = false;
+  let selection = new Set(); // "r,c"
+  let selectionMode = null;  // "add" | "remove"
+
+  // Rule draft coming from Discovery (or from local)
+  // draft = { discovery:{...}, suggested_name?, suggested_color?, ... }
+  let draft = null;
+
+  // ----------------------------
+  // Utils
+  // ----------------------------
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const keyRC = (r, c) => `${r},${c}`;
+
+  function timeToMin(t) {
+    const [hh, mm] = String(t).split(":").map(x => parseInt(x, 10));
+    return hh * 60 + mm;
+  }
+
+  function minToTime(m) {
+    const hh = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${pad2(hh)}:${pad2(mm)}`;
+  }
+
+  function clampToStep(mins) {
+    return Math.round(mins / STEP_MIN) * STEP_MIN;
+  }
+
+  function safeVal(el, fallback) {
+    if (!el) return fallback;
+    const v = el.value;
+    return (v === undefined || v === null || v === "") ? fallback : v;
+  }
+
+  function todayStart() {
+    const d = new Date();
+    d.setHours(0,0,0,0);
+    return d;
+  }
+
+  function getStartOfWeekMonday(d) {
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    const day = x.getDay(); // 0=Dom ... 6=Sab
+    const diff = (day === 0) ? -6 : (1 - day);
+    x.setDate(x.getDate() + diff);
+    return x;
+  }
+
+  function computeDayISO(c) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + c);
+    return d.toISOString().slice(0,10);
+  }
+
+  // Deterministic integer seed from a string (fast hash)
+  function hashSeed(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return Math.abs(h);
+  }
+
+  function setSwatch() {
+    if (!swatchPreview || !slotColor) return;
+    swatchPreview.style.background = slotColor.value;
+  }
+
+  function save() {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      rows,
+      startDateISO: startDate ? startDate.toISOString() : null,
+      grid: gridState,
+      rules,
+    }));
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return false;
+      const obj = JSON.parse(raw);
+      if (!obj || !Array.isArray(obj.grid) || typeof obj.rows !== "number") return false;
+
+      rows = obj.rows;
+      gridState = obj.grid;
+      rules = obj.rules || {};
+      startDate = obj.startDateISO ? new Date(obj.startDateISO) : null;
+
+      // ensure sub-objects exist
+      Object.keys(rules).forEach(id => {
+        const r = rules[id];
+        if (!r) return;
+        if (!r.playlistsByDay) r.playlistsByDay = {};
+        if (!r.discovery) r.discovery = {};
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function resetState() {
+    gridState = Array.from({ length: rows }, () => Array.from({ length: COLS }, () => null));
+    rules = {};
+    selection.clear();
+    save();
+  }
+
+  // ----------------------------
+  // Querystring / handoff from Discovery
+  // ----------------------------
+  // We support 2 handoff methods:
+  // A) sessionStorage["sisma_planner_draft"] = JSON.stringify(draft)
+  // B) URL param: ?draft=... (base64url JSON)  (optional)
+  //
+  // Discovery should do:
+  //   sessionStorage.setItem("sisma_planner_draft", JSON.stringify({
+  //     discovery: payloadToPlanner,
+  //     suggested_name: "Lunch Italy",
+  //     suggested_color: "#77dd77"
+  //   }));
+  //   window.location.href = "/planner/";
+  function readDraftFromSessionOrUrl() {
+    // sessionStorage
+    try {
+      const raw = sessionStorage.getItem("sisma_planner_draft");
+      if (raw) {
+        sessionStorage.removeItem("sisma_planner_draft"); // one-shot
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj === "object") return obj;
+      }
+    } catch {}
+
+    // url ?draft=base64url(json)
+    try {
+      const url = new URL(window.location.href);
+      const b64 = url.searchParams.get("draft");
+      if (b64) {
+        const json = atob(b64.replace(/-/g, "+").replace(/_/g, "/"));
+        const obj = JSON.parse(json);
+        if (obj && typeof obj === "object") return obj;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function hydrateControlsFromDraft(d) {
+    if (!d) return;
+
+    if (slotPreset && d.discovery && d.discovery.preset) {
+      slotPreset.value = String(d.discovery.preset);
+    }
+
+    if (slotName && (d.suggested_name || d.name)) {
+      slotName.value = String(d.suggested_name || d.name);
+    }
+
+    if (slotColor && (d.suggested_color || d.color)) {
+      slotColor.value = String(d.suggested_color || d.color);
+      setSwatch();
+    }
+  }
+
+  // ----------------------------
+  // Calendar rendering
+  // ----------------------------
+  function ensureGridSize() {
+    const start = timeToMin(START_DAY);
+    const end   = timeToMin(END_DAY);
+    rows = Math.floor((end - start) / STEP_MIN);
+
+    if (!startDate) startDate = getStartOfWeekMonday(todayStart());
+
+    const ok =
+      Array.isArray(gridState) &&
+      gridState.length === rows &&
+      Array.isArray(gridState[0]) &&
+      gridState[0].length === COLS;
+
+    if (!ok) {
+      gridState = Array.from({ length: rows }, () => Array.from({ length: COLS }, () => null));
+    }
+  }
+
+  function buildHeads() {
+    if (!daysHead) return;
+    daysHead.innerHTML = "";
+    for (let c = 0; c < COLS; c++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + c);
+
+      const el = document.createElement("div");
+      el.className = "day-head";
+      el.textContent = WEEKDAY_IT[d.getDay()];
+      daysHead.appendChild(el);
+    }
+  }
+
+  function buildTimeColumn() {
+    if (!timeCol) return;
+    timeCol.innerHTML = "";
+    const start = timeToMin(START_DAY);
+    const end   = timeToMin(END_DAY);
+
+    for (let m = start; m < end; m += 60) {
+      const row = document.createElement("div");
+      row.className = "time-row";
+      row.textContent = minToTime(m);
+      timeCol.appendChild(row);
+    }
+  }
+
+  function findCell(r, c) {
+    if (!daysGrid) return null;
+    return daysGrid.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+  }
+
+  function repaintFromState() {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = findCell(r,c);
+        if (!cell) continue;
+
+        const entry = gridState[r][c];
+        const rule = entry?.ruleId ? rules[entry.ruleId] : null;
+
+        if (rule?.color) {
+          cell.style.background = rule.color;
+        } else {
+          cell.style.background = "rgba(255,255,255,0.02)";
+        }
+
+        if (selection.has(keyRC(r,c))) {
+          cell.classList.add("selected");
+        } else {
+          cell.classList.remove("selected");
+        }
+      }
+    }
+  }
+
+  function buildGrid() {
+    ensureGridSize();
+    if (!daysGrid) return;
+
+    daysGrid.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    daysGrid.appendChild(grid);
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.r = String(r);
+        cell.dataset.c = String(c);
+
+        cell.addEventListener("mousedown", onCellMouseDown);
+        cell.addEventListener("mouseenter", onCellMouseEnter);
+        cell.addEventListener("click", onCellClick);
+
+        grid.appendChild(cell);
+      }
+    }
+
+    repaintFromState();
+  }
+
+  // ----------------------------
+  // Selection (paint)
+  // ----------------------------
+  function setCellSelected(r,c,on){
+    const k = keyRC(r,c);
+    const cell = findCell(r,c);
+    if (!cell) return;
+
+    if (on) selection.add(k);
+    else selection.delete(k);
+
+    cell.classList.toggle("selected", on);
+  }
+
+  function onCellMouseDown(e) {
+    e.preventDefault();
+    const r = parseInt(e.currentTarget.dataset.r, 10);
+    const c = parseInt(e.currentTarget.dataset.c, 10);
+
+    const k = keyRC(r,c);
+    const already = selection.has(k);
+
+    selectionMode = already ? "remove" : "add";
+    isMouseDown = true;
+    if (daysGrid) daysGrid.classList.add("painting");
+
+    setCellSelected(r,c, selectionMode === "add");
+  }
+
+  function onCellMouseEnter(e) {
+    if (!isMouseDown) return;
+    const r = parseInt(e.currentTarget.dataset.r, 10);
+    const c = parseInt(e.currentTarget.dataset.c, 10);
+    setCellSelected(r,c, selectionMode === "add");
+  }
+
+  function stopSelecting() {
+    if (!isMouseDown) return;
+    isMouseDown = false;
+    selectionMode = null;
+    if (daysGrid) daysGrid.classList.remove("painting");
+  }
+
+  // ----------------------------
+  // Sidebar
+  // ----------------------------
+  function renderSidebarEmpty(msg = "Cella vuota: nessuna playlist associata.") {
+    if (slotInfo) slotInfo.textContent = msg;
+    if (slotPlaylistList) slotPlaylistList.innerHTML = "";
+  }
+
+  function formatRuleLabel(rule, dayISO) {
+    const d = new Date(dayISO + "T00:00:00");
+    const dayLabel = WEEKDAY_IT[d.getDay()];
+    const name = (rule.name || "").trim() || "Slot";
+    const range = `${rule.start}–${rule.end}`;
+    return `${dayLabel} ${dayISO} • ${name} • ${range}`;
+  }
+
+  async function onCellClick(e) {
+    if (isMouseDown) return;
+
+    const r = parseInt(e.currentTarget.dataset.r, 10);
+    const c = parseInt(e.currentTarget.dataset.c, 10);
+
+    const entry = gridState[r][c];
+    if (!entry?.ruleId) {
+      renderSidebarEmpty();
+      return;
+    }
+
+    const rule = rules[entry.ruleId];
+    if (!rule) {
+      renderSidebarEmpty("Rule mancante (stato corrotto).");
+      return;
+    }
+
+    const dayISO = computeDayISO(c);
+
+    if (slotInfo) slotInfo.textContent = formatRuleLabel(rule, dayISO);
+    if (!slotPlaylistList) return;
+
+    slotPlaylistList.innerHTML = `<div class="hint">Carico playlist…</div>`;
+
+    try {
+      await ensureGeneratedForDays(rule.id, [dayISO]); // lazy: generate one day if missing
+      const playlist = rule.playlistsByDay?.[dayISO] || [];
+
+      if (!playlist.length) {
+        slotPlaylistList.innerHTML = `<div class="hint">Nessun brano trovato per questo slot.</div>`;
+        return;
+      }
+
+      slotPlaylistList.innerHTML = playlist.map((x, i) => {
+        const artist = x.artist ? ` — ${x.artist}` : "";
+        const bpm = (x.bpm != null && x.bpm !== "") ? ` <span class="muted">(${x.bpm})</span>` : "";
+        return `<div class="pl-item">${i+1}. ${x.title}${artist}${bpm}</div>`;
+      }).join("");
+    } catch (err) {
+      slotPlaylistList.innerHTML = `<div class="hint">Errore: ${err.message}</div>`;
+    }
+  }
+
+  // ----------------------------
+  // Rule model + applying to grid
+  // ----------------------------
+  function getSelectedWeekdays() {
+    const fallback = new Set([1,2,3,4,5]); // Mon-Fri
+    if (!weekdayToggles) return fallback;
+
+    const active = new Set();
+    weekdayToggles.querySelectorAll("[data-wd].active").forEach(btn => {
+      active.add(parseInt(btn.dataset.wd,10));
+    });
+
+    return active.size ? active : fallback;
+  }
+
+  function ensureWeekdayToggles() {
+    if (!weekdayToggles) return;
+    if (weekdayToggles.children.length) return;
+
+    const order = [1,2,3,4,5,6,0]; // Monday..Sunday
+    order.forEach(wd => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wd-btn";
+      b.dataset.wd = String(wd);
+      b.textContent = WEEKDAY_IT[wd];
+      if ([1,2,3,4,5].includes(wd)) b.classList.add("active");
+      b.addEventListener("click", () => b.classList.toggle("active"));
+      weekdayToggles.appendChild(b);
+    });
+  }
+
+  function buildRuleId(rule) {
+    // Stable-ish ID: time + weekdays + weeks + a short hash of discovery payload
+    const wd = Array.from(rule.weekdays).sort().join("");
+    const base = `${rule.start.replace(":","")}_${rule.end.replace(":","")}_w${rule.weeks}_d${wd}`;
+
+    const discStr = JSON.stringify(rule.discovery || {});
+    const h = hashSeed(discStr).toString(16).slice(0,6);
+    return `r_${base}_${h}`;
+  }
+
+  function applyRuleToGrid(rule) {
+    const startMin = timeToMin(START_DAY);
+    const dayStart = timeToMin(rule.start);
+    const dayEnd = timeToMin(rule.end);
+
+    const a = Math.max(startMin, clampToStep(dayStart));
+    const b = Math.min(timeToMin(END_DAY), clampToStep(dayEnd));
+    if (b <= a) return;
+
+    const r0 = Math.floor((a - startMin) / STEP_MIN);
+    const r1 = Math.ceil((b - startMin) / STEP_MIN) - 1;
+
+    const weekdays = new Set(rule.weekdays || []);
+
+    for (let c = 0; c < COLS; c++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + c);
+
+      const weekIndex = Math.floor(c / 7) + 1;
+      if (weekIndex > rule.weeks) continue;
+      if (!weekdays.has(d.getDay())) continue;
+
+      for (let r = r0; r <= r1; r++) {
+        if (r < 0 || r >= rows) continue;
+        gridState[r][c] = { ruleId: rule.id };
+      }
+    }
+  }
+
+  function clearRuleFromGrid(ruleId) {
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const entry = gridState[r][c];
+        if (entry?.ruleId === ruleId) gridState[r][c] = null;
+      }
+    }
+  }
+
+  // Compute occurrences (dayISOs) for a rule within the current 2-week window
+  function occurrencesInView(rule) {
+    const weekdays = new Set(rule.weekdays || []);
+    const out = [];
+    for (let c = 0; c < COLS; c++) {
+      const d = new Date(startDate);
+      d.setDate(startDate.getDate() + c);
+
+      const weekIndex = Math.floor(c / 7) + 1;
+      if (weekIndex > rule.weeks) continue;
+      if (!weekdays.has(d.getDay())) continue;
+
+      out.push(computeDayISO(c));
+    }
+    return out;
+  }
+
+  // ----------------------------
+  // Backend calls
+  // ----------------------------
+  async function fetchGenerateBatch(payload) {
+    const res = await fetch("/planner/api/generate_batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  // Ensure playlists exist for given days. Uses batch endpoint.
+  async function ensureGeneratedForDays(ruleId, dayISOs) {
+    const rule = rules[ruleId];
+    if (!rule) return;
+
+    if (!rule.playlistsByDay) rule.playlistsByDay = {};
+    const missing = dayISOs.filter(d => !(rule.playlistsByDay[d] && rule.playlistsByDay[d].length));
+    if (!missing.length) return;
+
+    // Important: we send discovery payload, not only preset
+    const discovery = rule.discovery || {};
+
+    // If your backend still expects "preset", we pass it too if present.
+    // (PlannerService can accept either "preset" or discovery payload; your final design decides.)
+    const payload = {
+      // --- core ---
+      preset: discovery.preset || discovery.preset_name || "",
+      discovery, // NEW: full discovery payload (planner_service should prefer this)
+
+      day_isos: missing,
+      k: rule.k || DEFAULT_K,
+      max_per_artist: rule.max_per_artist || DEFAULT_MAX_PER_ARTIST,
+      cooldown_days: rule.cooldown_days ?? DEFAULT_COOLDOWN_DAYS,
+
+      // deterministic seed base: ruleId (backend can still do per-day hash)
+      seed: hashSeed(ruleId),
+      exclude_track_ids: discovery.exclude_track_ids || [],
+    };
+
+    const data = await fetchGenerateBatch(payload);
+
+    const byDay = data.playlistsByDay || {};
+    Object.keys(byDay).forEach(day => {
+      rule.playlistsByDay[day] = byDay[day] || [];
+    });
+
+    // optional store report
+    if (!rule.reportByDay) rule.reportByDay = {};
+    if (data.report) {
+      // data.report can be global; if you later return per-day reports, adapt here.
+      missing.forEach(d => { rule.reportByDay[d] = data.report; });
+    }
+
+    save();
+  }
+
+  // ----------------------------
+  // Planner actions
+  // ----------------------------
+  async function applyDraftOrFormToPlanner() {
+    // Rule data from form + draft.discovery
+    const name  = safeVal(slotName, "").trim();
+    const color = safeVal(slotColor, "#77dd77");
+    const start = safeVal(slotStart, "10:00");
+    const end   = safeVal(slotEnd,   "11:00");
+
+    const weeks = parseInt(safeVal(weeksCount, "2"), 10) || 2;
+    const weekdaysSet = getSelectedWeekdays();
+
+    // discovery payload must exist; if absent, fallback to preset dropdown (legacy)
+    const disc = (draft && draft.discovery) ? draft.discovery : null;
+    const presetFallback = safeVal(slotPreset, "").trim();
+
+    const discoveryPayload = disc || { preset: presetFallback };
+
+    const rule = {
+      id: "", // set below
+      name: name || (draft?.suggested_name || "Slot"),
+      color,
+      start,
+      end,
+      weeks,
+      weekdays: Array.from(weekdaysSet),
+      discovery: discoveryPayload,
+
+      // generation knobs
+      k: DEFAULT_K,
+      max_per_artist: DEFAULT_MAX_PER_ARTIST,
+      cooldown_days: DEFAULT_COOLDOWN_DAYS,
+
+      playlistsByDay: {},
+      reportByDay: {}
+    };
+
+    rule.id = buildRuleId(rule);
+
+    if (rules[rule.id]) {
+      // merge
+      const prev = rules[rule.id];
+      rule.playlistsByDay = prev.playlistsByDay || {};
+      rule.reportByDay = prev.reportByDay || {};
+    } else {
+      rules[rule.id] = rule;
+    }
+
+    // Ensure stored
+    rules[rule.id] = rule;
+
+    // Apply to grid
+    applyRuleToGrid(rule);
+
+    // Pre-warm first occurrence only (so UI doesn't feel empty)
+    try {
+      const occ = occurrencesInView(rule);
+      if (occ.length) await ensureGeneratedForDays(rule.id, [occ[0]]);
+    } catch (err) {
+      if (slotInfo) slotInfo.textContent = `Errore pre-warm: ${err.message}`;
+    }
+
+    selection.clear();
+    repaintFromState();
+    save();
+  }
+
+  async function generateAllForRule(ruleId) {
+    const rule = rules[ruleId];
+    if (!rule) return;
+
+    const occ = occurrencesInView(rule);
+    if (!occ.length) return;
+
+    if (slotInfo) slotInfo.textContent = `Genero ${occ.length} playlist…`;
+    if (slotPlaylistList) slotPlaylistList.innerHTML = `<div class="hint">Batch generation…</div>`;
+
+    await ensureGeneratedForDays(ruleId, occ);
+
+    if (slotInfo) slotInfo.textContent = `Generate ${occ.length} playlist per "${rule.name || "Slot"}".`;
+  }
+
+  function resetAll() {
+    resetState();
+    buildGrid();
+    buildHeads();
+    repaintFromState();
+    renderSidebarEmpty();
+  }
+
+  // ----------------------------
+  // Events
+  // ----------------------------
+  if (slotColor) slotColor.addEventListener("input", setSwatch);
+  if (btnApplyRule) btnApplyRule.addEventListener("click", applyDraftOrFormToPlanner);
+
+  if (btnGenerateAll) {
+    btnGenerateAll.addEventListener("click", async () => {
+      // generate all for the most recently added rule (simple UX)
+      const ids = Object.keys(rules);
+      if (!ids.length) return;
+      const last = ids[ids.length - 1];
+      try {
+        await generateAllForRule(last);
+      } catch (err) {
+        renderSidebarEmpty(`Errore: ${err.message}`);
+      }
+    });
+  }
+
+  if (btnResetPlan) btnResetPlan.addEventListener("click", resetAll);
+
+  document.addEventListener("mouseup", stopSelecting);
+  document.addEventListener("mouseleave", stopSelecting);
+
+  // ----------------------------
+  // Init
+  // ----------------------------
+  startDate = getStartOfWeekMonday(todayStart());
+
+  ensureGridSize();
+  if (load()) {
+    if (!startDate) startDate = getStartOfWeekMonday(todayStart());
+    ensureGridSize();
+  }
+
+  // Draft handoff from Discovery
+  draft = readDraftFromSessionOrUrl();
+  if (draft) hydrateControlsFromDraft(draft);
+
+  ensureWeekdayToggles();
+  setSwatch();
+  buildHeads();
+  buildTimeColumn();
+  buildGrid();
+
+  if (draft && draft.auto_apply === true) {
+    applyDraftOrFormToPlanner().catch(() => {});
+  }
+
+  renderSidebarEmpty();
+})();
+
+
+// --- Discovery -> Planner handoff ---
+(function () {
+  const btn = document.getElementById("btn_add_to_planner");
+  const form = document.getElementById("playlist_form");
+  if (!btn || !form) return;
+
+  function getSelectedWeekdaysFromHidden() {
+    const h = document.getElementById("planner_weekdays");
+    const raw = h ? String(h.value || "") : "";
+    const arr = raw.split(",").map(x => parseInt(x.trim(), 10)).filter(Number.isFinite);
+    // fallback Mon-Fri
+    return arr.length ? arr : [1,2,3,4,5];
+  }
+
+  function formToObject(fd) {
+    const obj = {};
+    for (const [k, v] of fd.entries()) {
+      obj[k] = v;
+    }
+    return obj;
+  }
+
+  btn.addEventListener("click", () => {
+    // --- planner controls (Discovery UI) ---
+    const name  = (document.getElementById("planner_slot_name")?.value || "").trim();
+    const color = (document.getElementById("planner_color")?.value || "#77dd77").trim();
+    const start = (document.getElementById("planner_start")?.value || "10:00").trim();
+    const end   = (document.getElementById("planner_end")?.value || "11:00").trim();
+    const weeks = parseInt(document.getElementById("planner_weeks")?.value || "2", 10) || 2;
+    const weekdays = getSelectedWeekdaysFromHidden();
+
+    // --- discovery payload = tutta la form ---
+    const fd = new FormData(form);
+    const discovery = formToObject(fd);
+
+    const draft = {
+      discovery,
+      suggested_name: name || "Slot",
+      suggested_color: color,
+      start,
+      end,
+      weeks,
+      weekdays,
+      auto_apply: true
+    };
+
+    sessionStorage.setItem("sisma_planner_draft", JSON.stringify(draft));
+    window.location.href = "/planner/";
+  });
+})();
+
+
+document.getElementById("btn_add_to_planner")?.addEventListener("click", function () {
+
+  const name = document.getElementById("playlist_name")?.value || "Untitled";
+  const color = document.getElementById("playlist_color")?.value || "#FFD403";
+
+  const timeFrom = document.getElementById("time_from")?.value || "";
+  const timeTo = document.getElementById("time_to")?.value || "";
+
+  const days = Array.from(document.querySelectorAll(".wd-btn.active"))
+      .map(btn => btn.dataset.day);
+
+  if (!days.length) {
+      alert("Select at least one weekday");
+      return;
+  }
+
+  const discoveryPayload = window.buildDiscoveryPayload
+      ? window.buildDiscoveryPayload()
+      : {};
+
+  const slot = {
+      id: "slot_" + Date.now(),
+      name,
+      color,
+      days,
+      timeFrom,
+      timeTo,
+      discoveryPayload
+  };
+
+  const existing = JSON.parse(localStorage.getItem("sisma_planner_slots") || "[]");
+  existing.push(slot);
+
+  localStorage.setItem("sisma_planner_slots", JSON.stringify(existing));
+
+  window.location.href = "/planner";
+});
+

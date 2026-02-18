@@ -1,18 +1,21 @@
 <!doctype html>
-<html lang="it" data-theme="dark">
+<html lang="it" data-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SISMA Planner</title>
+  <title>SISMA — Planner</title>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/planner.css') }}">
 </head>
 
 <body>
-  <div class="planner-wrap">
+  <div class="wrap planner-wrap">
+
     <header class="planner-header">
       <div class="brand">
         <div class="logo">SISMA</div>
-        <div class="subtitle">Planner (pre-beta)</div>
+        <div class="subtitle">Planner</div>
       </div>
 
       <nav class="tabs">
@@ -21,86 +24,131 @@
       </nav>
     </header>
 
-    <main class="planner-main">
-      <!-- Sidebar MINIMAL + powerful -->
-      <aside class="panel">
-        <h2>Planner</h2>
+    <main class="planner-layout">
 
-        <div class="field">
-          <label for="slotPreset">Preset</label>
-          <select id="slotPreset">
-            {% for p in presets %}
-              <option value="{{ p }}">{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
+      <!-- SIDEBAR -->
+      <aside class="planner-panel card">
 
-        <div class="row">
-          <div class="field" style="flex:1;">
-            <label for="slotStart">Inizio</label>
-            <input id="slotStart" type="time" value="10:00" step="1800" />
+        <div class="panel-head">
+          <div>
+            <h2>Planner</h2>
+            <div class="panel-sub">Build • Preview • Publish</div>
           </div>
-          <div class="field" style="flex:1;">
-            <label for="slotEnd">Fine</label>
-            <input id="slotEnd" type="time" value="11:00" step="1800" />
+
+          <div class="panel-actions">
+            <button id="btnClearPlan" class="btn secondary" type="button">Clear</button>
+            <button id="btnExportPlan" class="btn btn-primary" type="button">Export</button>
           </div>
         </div>
 
-        <div class="field">
-          <label>Giorni settimana</label>
-          <div id="weekdayToggles" class="weekday-toggles"></div>
-        </div>
-
-        <div class="field">
-          <label for="weeksCount">Numero settimane</label>
-          <select id="weeksCount">
-            <option value="1">1 settimana</option>
-            <option value="2" selected>2 settimane</option>
-            <option value="3">3 settimane</option>
-            <option value="4">4 settimane</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="slotColor">Colore</label>
-          <div class="color-row">
-            <input id="slotColor" type="color" value="#77dd77" />
-            <div class="swatch" id="swatchPreview"></div>
+        <section class="panel-section">
+          <div class="section-title">Finestra</div>
+          <div class="grid-2">
+            <button id="btnPrevWindow" class="btn secondary" type="button">← Prev</button>
+            <button id="btnNextWindow" class="btn secondary" type="button">Next →</button>
           </div>
-        </div>
+          <div id="windowLabel" class="hint" style="margin-top:8px;">—</div>
+        </section>
 
-        <div class="row">
-          <button id="btnGenerate" class="btn primary">Genera playlist</button>
-          <button id="btnResetPlan" class="btn danger">Reset</button>
-        </div>
+        <section class="panel-section">
+          <div class="section-title">Planning summary</div>
+          <div id="summaryStats" class="summary-stats">
+            <div class="muted">—</div>
+          </div>
+        </section>
 
-        <div class="hint">
-          “Genera playlist” applica la regola a tutte le celle target (giorni + fascia).<br/>
-          Click su una cella colorata = mostra la playlist associata.
-        </div>
+        <section class="panel-section">
+          <div class="section-title">Slots</div>
+          <div id="slotList" class="slot-list">
+            <div class="hint">Nessuno slot. Aggiungilo dal Discovery.</div>
+          </div>
+        </section>
 
-        <hr/>
+        <section class="panel-section">
+          <div class="section-title">Slot selezionato</div>
+          <div id="slotInfo" class="hint">Clicca una cella per vedere la playlist.</div>
 
-        <!-- Viewer -->
-        <h2 style="margin-top:0;">Playlist cella</h2>
-        <div id="slotInfo" class="hint" style="margin-top:0;">
-          Clicca una cella colorata per vedere i dettagli.
-        </div>
-        <div id="slotPlaylistList" class="playlist-list"></div>
+          <div class="slot-controls">
+            <div class="field">
+              <label for="slotColorEdit">Colore</label>
+              <input id="slotColorEdit" type="color" value="#FFD403" />
+            </div>
+
+            <div class="field">
+              <label for="slotMaxArtist">Max per artist</label>
+              <input id="slotMaxArtist" type="number" min="1" max="5" value="2" />
+            </div>
+
+            <div class="field">
+              <label for="slotCooldown">Cooldown (days)</label>
+              <input id="slotCooldown" type="number" min="0" max="7" value="2" />
+            </div>
+
+            <div class="field">
+              <label for="slotK">K (tracks)</label>
+              <input id="slotK" type="number" min="10" max="150" value="50" />
+            </div>
+          </div>
+
+          <div class="hint tiny">Beta: colore + parametri influenzano la generazione.</div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-title">Playlist del giorno</div>
+          <div id="slotPlaylistList" class="playlist-list">
+            <div class="hint">—</div>
+          </div>
+        </section>
+
+        <section class="panel-section publish-box">
+          <div class="section-title">Publish</div>
+
+          <div class="spotify-status">
+            <span class="dot dot-off"></span>
+            <span class="muted">Spotify: not connected</span>
+          </div>
+
+          <button id="btnCommitSpotify" class="btn btn-spotify" type="button">
+            Send to Spotify
+          </button>
+
+          <button id="btnDownloadTimetable" class="btn secondary" type="button">
+            Download timetable (JSON)
+          </button>
+
+          <div class="hint tiny">Spotify = stub (per ora). JSON = export completo.</div>
+        </section>
+
+        <details class="mini">
+          <summary>Report / Debug</summary>
+          <pre id="debugBox" class="debug">—</pre>
+        </details>
+
       </aside>
 
-      <!-- Calendar -->
-      <section class="calendar">
-        <div class="calendar-top">
-          <div class="time-col-head">Ora</div>
-          <div class="days-head" id="daysHead"></div>
+      <!-- CALENDAR -->
+      <section class="planner-calendar card">
+
+        <div class="cal-top">
+          <div class="cal-time-head">Ora</div>
+          <div class="cal-days-head-clip">
+            <div class="cal-days-head" id="daysHead"></div>
+          </div>
         </div>
 
-        <div class="calendar-body">
-          <div class="time-col" id="timeCol"></div>
-          <div class="days-grid" id="daysGrid"></div>
+        <div class="cal-body">
+          <div class="cal-time-col" id="timeCol"></div>
+
+          <!-- this is the only scroller -->
+          <div class="cal-grid-scroll" id="gridScroll">
+            <div class="cal-grid-wrap" id="daysGrid">
+              <!-- JS injects: (1) base cells layer, (2) blocks overlay layer -->
+            </div>
+          </div>
         </div>
+
       </section>
+
     </main>
   </div>
 

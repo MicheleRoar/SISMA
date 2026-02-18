@@ -3,12 +3,13 @@ from pathlib import Path
 
 from .services.data_store import DataStore
 from .services.recommender import PlaylistRecommender, RecommenderConfig
+from .services.planner_service import PlannerService
 
 
 def create_app():
-    base_dir = Path(__file__).resolve().parent  # .../SISMA/app
-    templates_dir = base_dir / "templates"      # .../SISMA/app/templates
-    static_dir = base_dir / "static"            # .../SISMA/app/static
+    base_dir = Path(__file__).resolve().parent
+    templates_dir = base_dir / "templates"
+    static_dir = base_dir / "static"
 
     app = Flask(
         __name__,
@@ -21,10 +22,13 @@ def create_app():
     from app.blueprints.spotify import bp as spotify_bp
     from app.blueprints.planner import bp as planner_bp
 
-    app.register_blueprint(discovery_bp)   # /
-    app.register_blueprint(spotify_bp)     # /spotify/callback
-    app.register_blueprint(planner_bp)     # /planner (per ora)
+    app.register_blueprint(discovery_bp)
+    app.register_blueprint(spotify_bp)
+    app.register_blueprint(planner_bp)
 
+    # -------------------------
+    # Core services (singletons)
+    # -------------------------
     store = DataStore(
         tracks_csv_path="data/archive/tracks.csv",
         artists_csv_path="data/archive/artists.csv",
@@ -35,7 +39,10 @@ def create_app():
     config = RecommenderConfig(k=50, max_per_artist=2)
     recommender = PlaylistRecommender(store, config=config)
 
+    planner_service = PlannerService(recommender)
+
     app.config["DATASTORE"] = store
     app.config["RECOMMENDER"] = recommender
+    app.config["PLANNER_SERVICE"] = planner_service
 
     return app
