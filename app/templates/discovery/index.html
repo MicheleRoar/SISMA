@@ -55,14 +55,22 @@
         <!-- PRESET -->
         <div class="row">
           <label for="preset"><strong>Preset</strong></label>
-          <select id="preset" name="preset">
-            <option value="">Custom</option>
-            {% for p in presets %}
-              <option value="{{ p }}">{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
 
+          <div class="inline-actions">
+            <select id="preset" name="preset">
+              <option value="">Custom</option>
+              {% for p in presets %}
+                <option value="{{ p }}">{{ p }}</option>
+              {% endfor %}
+            </select>
+
+            <!-- Load preset (settings file) -->
+            <label class="btn secondary file-btn" for="file_load_query" title="Load settings from JSON">
+              Load preset
+            </label>
+            <input type="file" id="file_load_query" accept="application/json" class="file-input-hidden">
+          </div>
+        </div>
 
         <!-- ARTISTS (include / exclude) -->
         <div class="row">
@@ -558,9 +566,16 @@
 
         <button class="btn" type="submit">Generate 50-song playlist</button>
 
-        <div class="small-actions">
-          <a class="link" id="download_json" href="#">Download JSON</a>
+        <div class="small-actions centered-actions">
+          <button type="button" class="mini-btn" id="download_json">
+            Download JSON
+          </button>
+
+          <button type="button" class="mini-btn" id="btn_download_query">
+            Download settings
+          </button>
         </div>
+
       </form>
     </section>
 

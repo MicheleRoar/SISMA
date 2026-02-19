@@ -670,7 +670,7 @@
   });
 
   // exclude genres
-  makeGenrePicker({
+  const excludePicker = makeGenrePicker({
     inputId: "exclude_genre_query",
     boxId: "exclude_genre_suggestions",
     chipsId: "exclude_genre_chips",
@@ -681,7 +681,12 @@
   window.SISMA_setGenres = function (arr) {
     if (includePicker) includePicker.set(arr || []);
   };
-})();
+
+  // NEW: setter exclude
+  window.SISMA_setExcludeGenres = function (arr) {
+    if (excludePicker) excludePicker.set(arr || []);
+  };
+  })();
 
 
 // --- Artist multi-select + autocomplete (include + exclude) ---
@@ -969,6 +974,15 @@ const excludeArtistPicker = makeArtistPicker({
   chipsId: "exclude_artist_chips",
   hiddenId: "exclude_artists",
 });
+
+window.SISMA_setArtists = function(arr, wArr){
+  if (includeArtistPicker) includeArtistPicker.set(arr || [], wArr || []);
+};
+
+window.SISMA_setExcludeArtists = function(arr){
+  if (excludeArtistPicker) excludeArtistPicker.set(arr || []);
+};
+
 
 })();
 
@@ -1483,14 +1497,18 @@ function toggleGenreUIForRegionMode() {
     const input  = document.getElementById(inputId);
     const chips  = document.getElementById(chipsId);
     const hidden = document.getElementById(hiddenId);
-    if (!input || !chips || !hidden) return;
+    if (!input || !chips || !hidden) return null;
 
     const selected = new Map(); // lower -> original
 
-    function syncHidden() {
-      hidden.value = Array.from(selected.values()).join(",");
+    function emitFormInput() {
       const form = document.getElementById("playlist_form");
       if (form) form.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    function syncHidden() {
+      hidden.value = Array.from(selected.values()).join(",");
+      emitFormInput();
     }
 
     function escapeHtml(s) {
@@ -1554,13 +1572,252 @@ function toggleGenreUIForRegionMode() {
     });
 
     // init from hidden defaults
-    parseCsvList(hidden.value).forEach((k) => {
-      selected.set(k.toLowerCase(), k);
-    });
+    parseCsvList(hidden.value).forEach((k) => selected.set(k.toLowerCase(), k));
     render();
+
+    return {
+      set(arr){
+        selected.clear();
+        (arr || []).forEach((k) => {
+          const cleaned = String(k || "").trim();
+          if (!cleaned) return;
+          selected.set(cleaned.toLowerCase(), cleaned);
+        });
+        render();
+        syncHidden();
+      }
+    };
   }
 
-  // 
-  makeKeywordPicker({ inputId: "keyword_query", chipsId: "keyword_chips", hiddenId: "keywords" });
-  makeKeywordPicker({ inputId: "exclude_keyword_query", chipsId: "exclude_keyword_chips", hiddenId: "exclude_keywords" });
+  const inc = makeKeywordPicker({ inputId: "keyword_query", chipsId: "keyword_chips", hiddenId: "keywords" });
+  const exc = makeKeywordPicker({ inputId: "exclude_keyword_query", chipsId: "exclude_keyword_chips", hiddenId: "exclude_keywords" });
+
+  window.SISMA_setKeywords = function(arr){ if (inc) inc.set(arr || []); };
+  window.SISMA_setExcludeKeywords = function(arr){ if (exc) exc.set(arr || []); };
 })();
+
+
+// =====================================================
+// SETTINGS EXPORT / IMPORT (Download settings + Load preset file)
+// =====================================================
+(function () {
+  const form = document.getElementById("playlist_form");
+  const btnDownload = document.getElementById("btn_download_query");
+  const fileLoad = document.getElementById("file_load_query"); // input type=file
+  if (!form || !btnDownload || !fileLoad) return;
+
+  // --- helpers ---
+  function csvSplit(x){
+    return String(x || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function chipsToList(chipsId){
+    const el = document.getElementById(chipsId);
+    if (!el) return [];
+    return Array.from(el.querySelectorAll(".chip"))
+      .map(ch => String(ch.textContent || "").replace(/×/g, "").trim())
+      .filter(Boolean);
+  }
+
+  function getSliderUI(name){
+    const a = document.getElementById(`${name}_min_ui`);
+    const b = document.getElementById(`${name}_max_ui`);
+    return {
+      min_ui: a ? Number(a.value) : null,
+      max_ui: b ? Number(b.value) : null,
+    };
+  }
+
+  function setValue(idOrName, value){
+    if (value === undefined || value === null) return;
+
+    // try id first
+    let el = document.getElementById(idOrName);
+    if (!el) el = form.querySelector(`[name="${CSS.escape(idOrName)}"]`);
+    if (!el) return;
+
+    if (el.type === "checkbox") {
+      el.checked = !!value;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    el.value = String(value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function applyRegionsFromList(isos){
+    // Usa il tuo meccanismo esistente: scrivi hidden e poi “rebuild” stato
+    const hidden = document.getElementById("region_isos");
+    if (!hidden) return;
+
+    hidden.value = (isos || []).map(x => String(x).toUpperCase().trim()).filter(Boolean).join(",");
+    hidden.dispatchEvent(new Event("input", { bubbles: true }));
+
+    // reset state
+    REGION_STATE.selected.clear();
+    REGION_STATE.cache.clear();
+
+    const list = readRegionIsosHidden();
+    list.forEach(iso => REGION_STATE.selected.add(iso));
+
+    updateRegionStatus();
+    writeRegionIsosHidden();
+    toggleGenreUIForRegionMode();
+    syncMapColorsWithSelection();
+
+    // fetch + keep union behavior (but chips suppressed anyway)
+    try{
+      await Promise.all(list.map(fetchRegionGenres));
+    }catch(e){
+      console.error(e);
+    }
+    toggleGenreUIForRegionMode();
+    syncMapColorsWithSelection();
+  }
+
+  // --- export ---
+  function buildSettingsObject(){
+    const fd = new FormData(form);
+    const params = {};
+    for (const [k,v] of fd.entries()) params[k] = v;
+
+    // IMPORTANT: save MANUAL chips, not the region-unioned hidden monster
+    const manualGenres = chipsToList("genre_chips");
+    const manualExcludeGenres = chipsToList("exclude_genre_chips");
+    const manualArtists = chipsToList("artist_chips");
+    const manualExcludeArtists = chipsToList("exclude_artist_chips");
+    const manualKeywords = chipsToList("keyword_chips");
+    const manualExcludeKeywords = chipsToList("exclude_keyword_chips");
+
+    // sliders UI positions (so restore is exact)
+    const sliders = {
+      danceability: getSliderUI("danceability"),
+      energy: getSliderUI("energy"),
+      loudness: getSliderUI("loudness"),
+      valence: getSliderUI("valence"),
+    };
+
+    // song mode state (checkbox not in form)
+    const enableSong = document.getElementById("enable_song_mode");
+    const songQuery = document.getElementById("song_query");
+    const songId = document.getElementById("song_track_id");
+
+    return {
+      version: 1,
+      created_at: new Date().toISOString(),
+      page: window.location.pathname,
+      params,
+      manual: {
+        genres: manualGenres,
+        exclude_genres: manualExcludeGenres,
+        artists: manualArtists,
+        exclude_artists: manualExcludeArtists,
+        keywords: manualKeywords,
+        exclude_keywords: manualExcludeKeywords,
+        region_isos: csvSplit(params.region_isos || ""),
+      },
+      sliders,
+      ui: {
+        enable_song_mode: !!(enableSong && enableSong.checked),
+        song_query: songQuery ? songQuery.value : "",
+        song_track_id: songId ? songId.value : "",
+      }
+    };
+  }
+
+  function downloadJson(obj, filename){
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  btnDownload.addEventListener("click", () => {
+    const settings = buildSettingsObject();
+    const stamp = settings.created_at.replace(/[:.]/g, "-");
+    downloadJson(settings, `sisma-settings-${stamp}.json`);
+  });
+
+  // --- import ---
+  async function applySettings(settings){
+    if (!settings || typeof settings !== "object") return;
+
+    // 1) basic params -> set inputs by name/id
+    const params = settings.params || {};
+    Object.keys(params).forEach((k) => setValue(k, params[k]));
+
+    // 2) restore sliders UI (this will recompute hidden ranges via your clampRanges)
+    const s = settings.sliders || {};
+    ["danceability","energy","loudness","valence"].forEach((name) => {
+      const o = s[name];
+      if (!o) return;
+      const minEl = document.getElementById(`${name}_min_ui`);
+      const maxEl = document.getElementById(`${name}_max_ui`);
+      if (minEl && o.min_ui != null) minEl.value = String(o.min_ui);
+      if (maxEl && o.max_ui != null) maxEl.value = String(o.max_ui);
+      if (minEl) minEl.dispatchEvent(new Event("input", { bubbles: true }));
+      if (maxEl) maxEl.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // 3) restore manual chips via setters (clean + canonical)
+    const m = settings.manual || {};
+
+    if (window.SISMA_setGenres) window.SISMA_setGenres(m.genres || []);
+    if (window.SISMA_setExcludeGenres) window.SISMA_setExcludeGenres(m.exclude_genres || []);
+
+    if (window.SISMA_setArtists) {
+      // keep existing weights alignment if present in params.artist_weights
+      const w = csvSplit((params.artist_weights || ""));
+      window.SISMA_setArtists(m.artists || [], w);
+    }
+    if (window.SISMA_setExcludeArtists) window.SISMA_setExcludeArtists(m.exclude_artists || []);
+
+    if (window.SISMA_setKeywords) window.SISMA_setKeywords(m.keywords || []);
+    if (window.SISMA_setExcludeKeywords) window.SISMA_setExcludeKeywords(m.exclude_keywords || []);
+
+    // 4) restore song mode
+    setValue("enable_song_mode", (settings.ui && settings.ui.enable_song_mode) ? 1 : 0);
+    const enableSong = document.getElementById("enable_song_mode");
+    if (enableSong) {
+      enableSong.checked = !!(settings.ui && settings.ui.enable_song_mode);
+      enableSong.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    if (settings.ui) {
+      setValue("song_query", settings.ui.song_query || "");
+      setValue("song_track_id", settings.ui.song_track_id || "");
+    }
+
+    // 5) restore regions LAST (so union is applied on top of manual)
+    await applyRegionsFromList(m.region_isos || []);
+
+    // 6) refresh download json link etc.
+    form.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  fileLoad.addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+
+    try{
+      const text = await f.text();
+      const obj = JSON.parse(text);
+      await applySettings(obj);
+    }catch(err){
+      console.error("Load settings failed:", err);
+      // niente alert: resta silenzioso, vedi console
+    }finally{
+      fileLoad.value = ""; // allow re-upload same file
+    }
+  });
+})();
+
