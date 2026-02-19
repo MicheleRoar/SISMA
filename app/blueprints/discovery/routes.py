@@ -330,6 +330,8 @@ def index():
         "key": 0.0,
         "mode": 1.0,
         "time_signature": 4.0,
+        "year_min": "",
+        "year_max": 2026,
         "genre": "",
         "artists": "",
         "genres": "",
@@ -418,6 +420,9 @@ def generate():
         if (mn is not None) and (mx is not None) and (mn > mx):
             mn, mx = mx, mn
 
+        if name == "year" and mx is None:
+            mx = 2026
+
         return mn, mx
 
     RANGE_FEATURES = [
@@ -430,6 +435,7 @@ def generate():
         "liveness",
         "tempo",
         "loudness",
+        "year",
     ]
 
     ranges = {}

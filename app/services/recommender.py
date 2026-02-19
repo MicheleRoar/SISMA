@@ -455,9 +455,6 @@ class PlaylistRecommender:
         return out.reset_index(drop=True)
 
 
-
-
-
     # -----------------------------
     # Range engine + Controlled fallback (core)
     # -----------------------------
@@ -471,8 +468,10 @@ class PlaylistRecommender:
     ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
         out: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
         for f, (mn, mx) in (ranges or {}).items():
-            if f not in self._feat_idx:
+            # Accept also non-audio hard filters like "year" (present in df but not in feature vector)
+            if (f not in self._feat_idx) and (f not in self.df.columns):
                 continue
+
 
             a = None if mn is None else float(mn)
             b = None if mx is None else float(mx)

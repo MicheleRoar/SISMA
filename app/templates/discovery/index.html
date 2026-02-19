@@ -401,11 +401,29 @@
             </div>
 
             <div class="row">
-              <label for="mode"><strong>Mode</strong></label>
-              <select id="mode" name="mode">
-                <option value="1" {% if defaults.get("mode", 1)|int == 1 %}selected{% endif %}>Major</option>
-                <option value="0" {% if defaults.get("mode", 1)|int == 0 %}selected{% endif %}>Minor</option>
-              </select>
+              <label><strong>Year</strong></label>
+              <div class="minmax">
+                <input
+                  type="number"
+                  step="1"
+                  min="1900"
+                  max="2026"
+                  id="year_min"
+                  name="year_min"
+                  placeholder="min"
+                  value="{{ defaults.year_min|float|int if defaults.year_min is defined and defaults.year_min != '' else '' }}"
+                >
+                <input
+                  type="number"
+                  step="1"
+                  min="1900"
+                  max="2026"
+                  id="year_max"
+                  name="year_max"
+                  placeholder="max"
+                  value="{{ defaults.year_max|float|int if defaults.year_max is defined and defaults.year_max != '' else '' }}"
+                >
+              </div>
             </div>
 
             <div class="row">
@@ -546,6 +564,10 @@
             }}–{{
               ((defaults.valence_max if defaults.valence_max is defined else defaults.valence) * 100) | round(0)
             }}
+            | 
+            Year
+            {{ defaults.year_min|float|int if defaults.year_min else '' }}–
+            {{ defaults.year_max|float|int if defaults.year_max else 2026 }}
             | 
             {% if defaults.region_isos %}
                 Region {{ defaults.region_isos }}

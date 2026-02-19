@@ -48,7 +48,7 @@ class DataStore:
     - standardizer
     - ui_genres (top-k genres for dropdown)
 
-    PATCHES (chirurgici, senza rimuovere funzioni):
+    PATCHES:
       - genre matching token-safe (no substring): usa delimitatori |...|
       - cache genre -> indices per lookup veloce
       - normalizzazione coerente (lower + strip + rimozione accenti)
@@ -174,7 +174,6 @@ class DataStore:
             return self._genre_to_indices[g]
 
         # 2) Fallback: bounded string token match (|g|)
-        # preferiamo genres_str_bounded se esiste, altrimenti proviamo a bounded-on-the-fly
         col = None
         if "genres_str_bounded" in df.columns:
             col = "genres_str_bounded"
@@ -185,7 +184,6 @@ class DataStore:
             return np.array([], dtype=np.int64)
 
         # token-safe: match |g|
-        # Se col non è già bounded, proviamo a renderla bounded al volo
         if col == "genres_str_bounded":
             s = df[col].astype(str).map(self._norm_text)
             token = f"|{g}|"
@@ -338,6 +336,16 @@ class DataStore:
         self.all_genres = sorted(list(counter.keys()), key=lambda s: str(s).lower())
 
         df = tracks
+
+
+        # Extract numeric year from release_date (YYYY-MM-DD -> YYYY)
+        if "release_date" in df.columns:
+            df["year"] = (
+                pd.to_datetime(df["release_date"], errors="coerce")
+                .dt.year
+                .fillna(0)
+                .astype(int)
+            )
 
         # explicit can be 0/1 already; still normalize
         if "explicit" in df.columns:
