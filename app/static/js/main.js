@@ -608,12 +608,24 @@
 
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
-      if (box.style.display !== "block") return;
-      const first = box.querySelector(".suggestion-item");
-      if (!first) return;
+
+      // blocca il submit del form (altrimenti ti genera la playlist)
       e.preventDefault();
-      addGenre(first.getAttribute("data-genre") || first.textContent);
+      e.stopPropagation();
+
+      // se dropdown aperto, prendi il primo suggerimento
+      if (box.style.display === "block") {
+        const first = box.querySelector(".suggestion-item");
+        if (first) {
+          addGenre(first.getAttribute("data-genre") || first.textContent);
+          return;
+        }
+      }
+
+      // altrimenti crea chip dalla keyword scritta
+      addGenre(input.value);
     });
+
 
     box.addEventListener("click", (e) => {
       const item = e.target.closest(".suggestion-item");
@@ -2044,10 +2056,9 @@ function toggleGenreUIForRegionMode() {
     const missing = dayISOs.filter(d => !(rule.playlistsByDay[d] && rule.playlistsByDay[d].length));
     if (!missing.length) return;
 
-    // Important: we send discovery payload, not only preset
+    // Important:it sends discovery payload, not only preset
     const discovery = rule.discovery || {};
 
-    // If your backend still expects "preset", we pass it too if present.
     // (PlannerService can accept either "preset" or discovery payload; your final design decides.)
     const payload = {
       // --- core ---
@@ -2316,3 +2327,97 @@ document.getElementById("btn_add_to_planner")?.addEventListener("click", functio
   window.location.href = "/planner";
 });
 
+// --- Keyword chips (include + exclude) ---
+(function () {
+  function parseCsvList(raw) {
+    return String(raw || "")
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  }
+
+  function makeKeywordPicker({ inputId, chipsId, hiddenId }) {
+    const input  = document.getElementById(inputId);
+    const chips  = document.getElementById(chipsId);
+    const hidden = document.getElementById(hiddenId);
+    if (!input || !chips || !hidden) return;
+
+    const selected = new Map(); // lower -> original
+
+    function syncHidden() {
+      hidden.value = Array.from(selected.values()).join(",");
+      const form = document.getElementById("playlist_form");
+      if (form) form.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function render() {
+      const values = Array.from(selected.values());
+      if (!values.length) {
+        chips.innerHTML = "";
+        chips.style.display = "none";
+        return;
+      }
+      chips.style.display = "flex";
+      chips.innerHTML = values.map((k) => {
+        const safe = escapeHtml(k);
+        return `
+          <span class="chip" data-name="${safe}">
+            ${safe}
+            <button type="button" aria-label="Remove ${safe}" title="Remove">×</button>
+          </span>`;
+      }).join("");
+    }
+
+    function addKeyword(v) {
+      const cleaned = String(v || "").trim();
+      if (!cleaned) return;
+      const key = cleaned.toLowerCase();
+      if (selected.has(key)) return;
+      selected.set(key, cleaned);
+      render();
+      syncHidden();
+      input.value = "";
+      input.focus();
+    }
+
+    function removeKeyword(v) {
+      const key = String(v || "").toLowerCase().trim();
+      selected.delete(key);
+      render();
+      syncHidden();
+    }
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      e.stopPropagation();
+      addKeyword(input.value);
+    });
+
+    chips.addEventListener("click", (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) return;
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      removeKeyword(chip.getAttribute("data-name") || chip.textContent);
+    });
+
+    // init from hidden defaults
+    parseCsvList(hidden.value).forEach((k) => {
+      selected.set(k.toLowerCase(), k);
+    });
+    render();
+  }
+
+  // 
+  makeKeywordPicker({ inputId: "keyword_query", chipsId: "keyword_chips", hiddenId: "keywords" });
+  makeKeywordPicker({ inputId: "exclude_keyword_query", chipsId: "exclude_keyword_chips", hiddenId: "exclude_keywords" });
+})();

@@ -117,14 +117,19 @@ def _get_selected_buckets_from_request():
     artists_raw = (request.args.get("artists") or "").strip()
     genres_raw = (request.args.get("genres") or "").strip()
     genre_single = (request.args.get("genre") or "").strip()
+    keywords_raw = (request.args.get("keywords") or "").strip()
+    
 
+    exclude_keywords_raw = (request.args.get("exclude_keywords") or "").strip()
     exclude_artists_raw = (request.args.get("exclude_artists") or "").strip()
     exclude_genres_raw = (request.args.get("exclude_genres") or "").strip()
 
     artists = _parse_csv_param(artists_raw)
-    genres_list = _parse_csv_param(genres_raw)
     exclude_artists = _parse_csv_param(exclude_artists_raw)
+    genres_list = _parse_csv_param(genres_raw)
     exclude_genres = _parse_csv_param(exclude_genres_raw)
+    keywords = _parse_csv_param(keywords_raw)
+    exclude_keywords = _parse_csv_param(exclude_keywords_raw)
 
     if (not genres_list) and genre_single:
         genres_list = [genre_single]
@@ -139,6 +144,10 @@ def _get_selected_buckets_from_request():
         exclude_genres,
         exclude_artists_raw,
         exclude_genres_raw,
+        keywords,
+        keywords_raw,
+        exclude_keywords,
+        exclude_keywords_raw,
     )
 
 
@@ -339,6 +348,8 @@ def index():
         "exclude_genres": "",
         "region_isos": "",
         "allow_explicit": 0,
+        "keywords": "",
+        "exclude_keywords": "",
     }
 
     return render_template(
@@ -370,6 +381,10 @@ def generate():
         exclude_genres,
         exclude_artists_raw,
         exclude_genres_raw,
+        keywords,
+        keywords_raw,
+        exclude_keywords,
+        exclude_keywords_raw,
     ) = _get_selected_buckets_from_request()
 
     # ---- region merge (NO UI overwrite) ----
@@ -516,7 +531,8 @@ def generate():
             weight_overrides=None,
             shuffle_within_top=True,
             random_state=42,
- 
+            include_keywords=keywords,
+            exclude_keywords=exclude_keywords,
         )
 
 
@@ -536,6 +552,9 @@ def generate():
             "exclude_genres": exclude_genres_raw,
             "region_isos": region_isos_raw,
             "allow_explicit": 1 if allow_explicit else 0,
+            "keywords": keywords_raw,
+            "exclude_keywords": exclude_keywords_raw,
+
 
         }
 
@@ -620,6 +639,9 @@ def generate():
         weight_overrides=None,
         shuffle_within_top=True,
         random_state=42,
+        include_keywords=keywords,
+        exclude_keywords=exclude_keywords,
+
     )
 
 
@@ -639,6 +661,9 @@ def generate():
         "exclude_genres": exclude_genres_raw,
         "region_isos": region_isos_raw,
         "allow_explicit": 1 if allow_explicit else 0,
+        "keywords": keywords_raw,
+        "exclude_keywords": exclude_keywords_raw,
+
     }
     for f in RANGE_FEATURES:
         mn, mx = ranges.get(f, (None, None))

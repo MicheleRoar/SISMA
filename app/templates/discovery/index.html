@@ -153,6 +153,49 @@
         </div>
 
 
+        <!-- KEYWORDS (include / exclude) -->
+        <div class="row">
+          <label><strong>Keyword(s)</strong></label>
+
+          <div class="dual-filter">
+
+            <!-- INCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label">Include</span>
+
+              <input
+                type="text"
+                id="keyword_query"
+                placeholder="Add keyword…"
+                autocomplete="off"
+              >
+              <div id="keyword_chips" class="chips"></div>
+
+              <input type="hidden" id="keywords" name="keywords"
+                     value="{{ defaults.keywords if defaults.keywords is defined else '' }}">
+            </div>
+
+            <!-- EXCLUDE -->
+            <div class="filter-col">
+              <span class="filter-label exclude">Exclude</span>
+
+              <input
+                type="text"
+                id="exclude_keyword_query"
+                placeholder="Exclude keyword…"
+                autocomplete="off"
+              >
+              <div id="exclude_keyword_chips" class="chips"></div>
+
+              <input type="hidden" id="exclude_keywords" name="exclude_keywords"
+                     value="{{ defaults.exclude_keywords if defaults.exclude_keywords is defined else '' }}">
+            </div>
+
+          </div>
+        </div>
+
+
+
 
 
       <div class="row">

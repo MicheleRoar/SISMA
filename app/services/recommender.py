@@ -270,6 +270,22 @@ class PlaylistRecommender:
             self._primary_artist = pd.Series([""] * len(self.df))
             self._artists_tokens_str = pd.Series(["||"] * len(self.df))
 
+        # --- KEYWORDS blob (cached, lowercase) ---
+        kw_cols = []
+        for c in ["track_name", "artists", "album_name", "genres_str", "track_genre"]:
+            if c in self.df.columns:
+                kw_cols.append(c)
+
+        if kw_cols:
+            tmp = self.df[kw_cols].copy()
+            for c in kw_cols:
+                tmp[c] = tmp[c].astype(str).fillna("")
+            self._kw_blob = tmp.agg(" ".join, axis=1).str.lower()
+        else:
+            self._kw_blob = pd.Series([""] * len(self.df))
+
+
+
     def _build_weight_vector(self, weights: Dict[str, float]) -> np.ndarray:
         w = np.ones(len(self.feature_names), dtype=np.float32)
         for f, val in (weights or {}).items():
@@ -301,12 +317,18 @@ class PlaylistRecommender:
         prefer_strength: float = 0.18,  # (non usato nel two-pass, tenuto per compatibilità)
         exclude_artists: Optional[List[str]] = None,
         exclude_genres: Optional[List[str]] = None,
+        include_keywords: Optional[List[str]] = None,
+        exclude_keywords: Optional[List[str]] = None,
+
     ) -> pd.DataFrame:
         exclude_track_ids = exclude_track_ids or set()
         include_artists = [str(x).strip() for x in (include_artists or []) if str(x).strip()]
         include_genres = [str(x).strip() for x in (include_genres or []) if str(x).strip()]
         exclude_artists = [str(x).strip() for x in (exclude_artists or []) if str(x).strip()]
         exclude_genres = [str(x).strip() for x in (exclude_genres or []) if str(x).strip()]
+        include_keywords = [str(x).strip().lower() for x in (include_keywords or []) if str(x).strip()]
+        exclude_keywords = [str(x).strip().lower() for x in (exclude_keywords or []) if str(x).strip()]
+
 
         idx = np.asarray(pool_idx, dtype=np.int64)
         if idx.size == 0:
@@ -317,6 +339,17 @@ class PlaylistRecommender:
         idx = self._apply_exclusions(idx, exclude_artists=exclude_artists, exclude_genres=exclude_genres)
         if idx.size == 0:
             return pd.DataFrame()
+
+        # HARD: exclude keywords (substring)
+        if exclude_keywords:
+            blob = self._kw_blob.iloc[idx].to_numpy(dtype=str)
+            bad = np.zeros(idx.size, dtype=bool)
+            for kw in exclude_keywords:
+                if kw:
+                    bad |= np.char.find(blob, kw) >= 0
+            idx = idx[~bad]
+            if idx.size == 0:
+                return pd.DataFrame()
 
         # helper: union indices for included artists/genres (global indices)
         def _union_artist_idx(names: List[str]) -> np.ndarray:
@@ -386,6 +419,20 @@ class PlaylistRecommender:
                     return []
 
             dloc = self._weighted_distance(self.X[local_idx], u_scaled, w_req)
+
+            # SOFT: include keywords boost (reduce distance if keyword matches)
+            if include_keywords:
+                blob = self._kw_blob.iloc[local_idx].to_numpy(dtype=str)
+                hits = np.zeros(local_idx.size, dtype=np.float32)
+                for kw in include_keywords:
+                    if not kw:
+                        continue
+                    hits += (np.char.find(blob, kw) >= 0).astype(np.float32)
+
+                # tune: each hit reduces distance a bit (distance is "lower is better")
+                KW_BONUS = 0.06
+                dloc = dloc - (hits * KW_BONUS)
+
 
             if shuffle_within_top:
                 rng = np.random.default_rng(random_state)
