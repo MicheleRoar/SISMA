@@ -427,21 +427,10 @@
             </div>
 
             <div class="row">
-              <label for="key"><strong>Key</strong></label>
-              <select id="key" name="key">
-                <option value="-1" {% if defaults.get("key", -1)|int == -1 %}selected{% endif %}>Unknown</option>
-                <option value="0"  {% if defaults.get("key", -1)|int == 0 %}selected{% endif %}>C</option>
-                <option value="1"  {% if defaults.get("key", -1)|int == 1 %}selected{% endif %}>C♯ / D♭</option>
-                <option value="2"  {% if defaults.get("key", -1)|int == 2 %}selected{% endif %}>D</option>
-                <option value="3"  {% if defaults.get("key", -1)|int == 3 %}selected{% endif %}>D♯ / E♭</option>
-                <option value="4"  {% if defaults.get("key", -1)|int == 4 %}selected{% endif %}>E</option>
-                <option value="5"  {% if defaults.get("key", -1)|int == 5 %}selected{% endif %}>F</option>
-                <option value="6"  {% if defaults.get("key", -1)|int == 6 %}selected{% endif %}>F♯ / G♭</option>
-                <option value="7"  {% if defaults.get("key", -1)|int == 7 %}selected{% endif %}>G</option>
-                <option value="8"  {% if defaults.get("key", -1)|int == 8 %}selected{% endif %}>G♯ / A♭</option>
-                <option value="9"  {% if defaults.get("key", -1)|int == 9 %}selected{% endif %}>A</option>
-                <option value="10" {% if defaults.get("key", -1)|int == 10 %}selected{% endif %}>A♯ / B♭</option>
-                <option value="11" {% if defaults.get("key", -1)|int == 11 %}selected{% endif %}>B</option>
+              <label for="allow_explicit"><strong>Explicit</strong></label>
+              <select id="allow_explicit" name="allow_explicit">
+                <option value="0" {% if defaults.get("allow_explicit", 0)|int == 0 %}selected{% endif %}>No</option>
+                <option value="1" {% if defaults.get("allow_explicit", 0)|int == 1 %}selected{% endif %}>Yes</option>
               </select>
             </div>
 

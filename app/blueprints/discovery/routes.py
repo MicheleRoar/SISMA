@@ -338,6 +338,7 @@ def index():
         "exclude_artists": "",
         "exclude_genres": "",
         "region_isos": "",
+        "allow_explicit": 0,
     }
 
     return render_template(
@@ -357,6 +358,7 @@ def generate():
 
     track_id = (request.args.get("track_id") or "").strip()
     region_isos_raw = (request.args.get("region_isos") or "").strip()
+    allow_explicit = (request.args.get("allow_explicit", "0") == "1")
 
     (
         artists,
@@ -484,7 +486,7 @@ def generate():
             user_input=user_input,
             ranges=ranges,
             lock_tempo=lock_tempo,
-            allow_explicit=False,
+            allow_explicit=allow_explicit,
             exclude_track_ids={track_id},   # avoid recommending the seed track back
             shuffle_within_top=True,
             random_state=42,
@@ -509,11 +511,12 @@ def generate():
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
             exclude_track_ids=set(),
-            allow_explicit=False,
+            allow_explicit=allow_explicit,
             dontcare=dontcare,
             weight_overrides=None,
             shuffle_within_top=True,
             random_state=42,
+ 
         )
 
 
@@ -532,6 +535,7 @@ def generate():
             "exclude_artists": exclude_artists_raw,
             "exclude_genres": exclude_genres_raw,
             "region_isos": region_isos_raw,
+            "allow_explicit": 1 if allow_explicit else 0,
 
         }
 
@@ -585,7 +589,7 @@ def generate():
         user_input=user_input,
         ranges=ranges,
         lock_tempo=lock_tempo,          # True iff tempo range provided
-        allow_explicit=False,
+        allow_explicit=allow_explicit,
         exclude_track_ids=set(),        # custom mode: nothing to exclude by id
         shuffle_within_top=True,
         random_state=42,
@@ -611,7 +615,7 @@ def generate():
         exclude_artists=exclude_artists,
         exclude_genres=exclude_genres,
         exclude_track_ids={track_id},   # keep it out even after ranking
-        allow_explicit=False,
+        allow_explicit=allow_explicit,
         dontcare=dontcare,
         weight_overrides=None,
         shuffle_within_top=True,
@@ -634,6 +638,7 @@ def generate():
         "exclude_artists": exclude_artists_raw,
         "exclude_genres": exclude_genres_raw,
         "region_isos": region_isos_raw,
+        "allow_explicit": 1 if allow_explicit else 0,
     }
     for f in RANGE_FEATURES:
         mn, mx = ranges.get(f, (None, None))

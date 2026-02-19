@@ -31,6 +31,7 @@
 /* ---------------- Sidebar ---------------- */
 
 .planner-panel{
+  margin-left: 18px;
   padding: 18px;
   display:flex;
   flex-direction:column;
@@ -229,6 +230,7 @@ details.mini summary{
 /* ---------------- Calendar ---------------- */
 
 .planner-calendar{
+  margin-right: 15px;
   padding:0;
   overflow:hidden;
 }
@@ -316,6 +318,7 @@ details.mini summary{
 
 /* base cells layer: keep gridlines visible */
 .p-cells{
+  margin-left: -15px;
   display:grid;
   grid-template-columns: repeat(14, var(--day-col-w));
   width: calc(14 * var(--day-col-w));
@@ -331,6 +334,7 @@ details.mini summary{
 
 /* overlay blocks layer: fused consecutive runs */
 .p-blocks{
+  margin-left: -15px;
   position:absolute;
   inset:0;
   pointer-events:none; /* clicks go to cells */
