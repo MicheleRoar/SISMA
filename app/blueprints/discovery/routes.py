@@ -6,6 +6,7 @@ import json
 from typing import Dict, List, Tuple
 
 import pandas as pd
+from collections import Counter
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 from app.services.presets import PRESETS
@@ -30,6 +31,50 @@ def api_region_genres():
 # ----------------------------
 # Helpers
 # ----------------------------
+
+def _debug_genres_not_in_filters(
+    playlist_df: pd.DataFrame,
+    *,
+    include_genres: List[str],
+    exclude_genres: List[str],
+) -> List[str]:
+    if playlist_df is None or playlist_df.empty:
+        return []
+
+    include_set = {g.strip().lower() for g in (include_genres or []) if g.strip()}
+    exclude_set = {g.strip().lower() for g in (exclude_genres or []) if g.strip()}
+
+    cnt = Counter()
+
+    for _, row in playlist_df.iterrows():
+        # prova genres_list
+        gl = row.get("genres_list", None)
+        if isinstance(gl, list):
+            for g in gl:
+                g2 = str(g).strip()
+                if not g2:
+                    continue
+                glw = g2.lower()
+                if glw not in include_set and glw not in exclude_set:
+                    cnt[g2] += 1
+        else:
+            # fallback genres_str
+            gs = str(row.get("genres_str", "") or "").strip()
+            if gs:
+                for g in gs.split("|"):
+                    g2 = g.strip()
+                    if not g2:
+                        continue
+                    glw = g2.lower()
+                    if glw not in include_set and glw not in exclude_set:
+                        cnt[g2] += 1
+
+    return [f"{g} ({c})" for g, c in cnt.most_common(30)]
+
+
+
+
+
 def _get_float(name: str, default: float) -> float:
     try:
         return float(request.args.get(name, default))
@@ -318,6 +363,90 @@ def _build_bucket_weights(
     return a_w, g_w
 
 
+def _extract_genres_from_row(row: pd.Series) -> List[str]:
+    """
+    Estrae generi da una riga risultati.
+    Supporta:
+      - genres_list (list)
+      - genres_str ("a|b|c")
+      - track_genre fallback ("a, b")
+    """
+    out: List[str] = []
+
+    gl = row.get("genres_list", None)
+    if isinstance(gl, list):
+        out.extend([str(x).strip() for x in gl if str(x).strip()])
+
+    if not out:
+        gs = str(row.get("genres_str", "") or "").strip()
+        if gs:
+            out.extend([p.strip() for p in gs.split("|") if p.strip()])
+
+    if not out:
+        tg = str(row.get("track_genre", "") or "").strip()
+        if tg:
+            out.extend([p.strip() for p in tg.split(",") if p.strip()])
+
+    # normalizza e dedup preservando ordine
+    seen = set()
+    cleaned = []
+    for g in out:
+        g2 = g.strip()
+        if g2 and g2.lower() not in seen:
+            seen.add(g2.lower())
+            cleaned.append(g2)
+    return cleaned
+
+
+def _bridge_genres_from_results(
+    playlist_df: pd.DataFrame,
+    *,
+    exclude_genres: List[str],
+    already_included_genres: List[str],
+    top_n: int = 25,
+) -> List[str]:
+    """
+    Prende i generi più frequenti presenti nei risultati,
+    escludendo quelli già nei filtri (manual+region) e quelli esclusi.
+    """
+    if playlist_df is None or playlist_df.empty:
+        return []
+
+    ex = {g.strip().lower() for g in (exclude_genres or []) if g and g.strip()}
+    already = {g.strip().lower() for g in (already_included_genres or []) if g and g.strip()}
+
+    cnt = Counter()
+    for _, row in playlist_df.iterrows():
+        for g in _extract_genres_from_row(row):
+            gl = g.lower()
+            if gl in ex:
+                continue
+            if gl in already:
+                continue
+            cnt[g] += 1
+
+    if not cnt:
+        return []
+
+    # più frequenti prima
+    return [g for g, _ in cnt.most_common(top_n)]
+
+
+def _seed_artists_from_results(playlist_df: pd.DataFrame, top_n: int = 20) -> List[str]:
+    """
+    Artisti più frequenti tra i risultati (primary artist).
+    """
+    if playlist_df is None or playlist_df.empty or "artists" not in playlist_df.columns:
+        return []
+    cnt = Counter()
+    for a in playlist_df["artists"].astype(str).fillna("").tolist():
+        pa = (a.split(";", 1)[0] if ";" in a else a).strip()
+        if pa:
+            cnt[pa] += 1
+    return [a for a, _ in cnt.most_common(top_n)]
+
+
+
 # ----------------------------
 # Routes
 # ----------------------------
@@ -409,9 +538,6 @@ def generate():
     artist_weights_raw = (request.args.get("artist_weights") or "").strip()
     weights_dict = _parse_artist_weights_param(artist_weights_raw)
 
-    bucket_count = len(artists) + len(genres_list)
-
-
     # ----------------------------
     # RANGE PARSING (NEW)
     # ----------------------------
@@ -494,15 +620,23 @@ def generate():
         user_input = _build_user_input_from_track_row(r)
         user_input = _apply_similarity_blend(user_input)
 
+        universe_idx = recommender.build_universe_indices(
+        include_artists=artists,
+        include_genres=include_genres_final,
+        exclude_artists=exclude_artists,
+        exclude_genres=exclude_genres,
+        )
+
 
         # 1) Build a BIG pool around the similarity user_input, constrained by ranges.
         #    lock_tempo=True iff user set tempo_min/max (hard BPM when requested)
         pool_df = recommender.build_pool(
             user_input=user_input,
+            universe_idx=universe_idx,   # <--- FIX
             ranges=ranges,
             lock_tempo=lock_tempo,
             allow_explicit=allow_explicit,
-            exclude_track_ids={track_id},   # avoid recommending the seed track back
+            exclude_track_ids={track_id},
             shuffle_within_top=True,
             random_state=42,
             dontcare=dontcare,
@@ -514,26 +648,141 @@ def generate():
         pool_idx = pool_df["_row_idx"].to_numpy()
 
 
-        # 2) Second stage: filter/rank INSIDE the pool
-        playlist_df = recommender.recommend_from_pool(
-            user_input=user_input,
-            pool_idx=pool_idx,
-            k=50,
-            max_per_artist=2,
-            include_artists=artists,
-            include_genres=include_genres_final,
-            include_mode="prefer",          # DISCOVERY: adding "pop" must not shrink the pool
+        TARGET = 50
+
+        # ----------------------------
+        # WIDE POOL (for PASS C semantic bridge)
+        # same audio/ranges, but NO include_genres hard restriction
+        # ----------------------------
+        universe_idx_wide = recommender.build_universe_indices(
+            include_artists=artists,   # keep artist focus if user selected artists (optional)
+            include_genres=[],         # <-- KEY: no genre hard filter
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
-            exclude_track_ids=set(),
-            allow_explicit=allow_explicit,
-            dontcare=dontcare,
-            weight_overrides=None,
-            shuffle_within_top=True,
-            random_state=42,
-            include_keywords=keywords,
-            exclude_keywords=exclude_keywords,
         )
+
+        pool_df_wide = recommender.build_pool(
+            user_input=user_input,
+            universe_idx=universe_idx_wide,
+            ranges=ranges,
+            lock_tempo=lock_tempo,
+            allow_explicit=allow_explicit,
+            exclude_track_ids={track_id},
+            shuffle_within_top=True,
+            random_state=41,
+            dontcare=dontcare,
+        )
+
+        if "_row_idx" not in pool_df_wide.columns:
+            raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
+
+        pool_idx_wide = pool_df_wide["_row_idx"].to_numpy()
+
+
+        # ----------------------------
+        # PASS A: "force selected buckets" (OR) + relax max_per_artist if needed
+        # ----------------------------
+        playlist_df = pd.DataFrame()
+        picked_ids = set()
+
+        for cap in [2, 4, 8, 12]:
+            tmp = recommender.recommend_from_pool(
+                user_input=user_input,
+                pool_idx=pool_idx,
+                k=TARGET,
+                max_per_artist=cap,
+                include_artists=artists,
+                include_genres=include_genres_final,
+                include_mode="must_any",          # <-- NEW MODE (OR)
+                exclude_artists=exclude_artists,
+                exclude_genres=exclude_genres,
+                exclude_track_ids=set(),          # (seed track exclusion handled in build_pool already)
+                allow_explicit=allow_explicit,
+                dontcare=dontcare,
+                weight_overrides=None,
+                shuffle_within_top=True,
+                random_state=42,
+                include_keywords=keywords,
+                exclude_keywords=exclude_keywords,
+            )
+
+            if len(tmp) > len(playlist_df):
+                playlist_df = tmp
+
+            if len(playlist_df) >= TARGET:
+                break
+
+        # ----------------------------
+        # PASS B: fill to TARGET from the same pool, without forcing buckets
+        # ----------------------------
+        if len(playlist_df) < TARGET:
+            already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
+
+            fill = recommender.recommend_from_pool(
+                user_input=user_input,
+                pool_idx=pool_idx,
+                k=TARGET,
+                max_per_artist=2,
+                include_artists=[],
+                include_genres=[],
+                include_mode="prefer",            # no forced buckets
+                exclude_artists=exclude_artists,
+                exclude_genres=exclude_genres,
+                exclude_track_ids=already,        # don't duplicate
+                allow_explicit=allow_explicit,
+                dontcare=dontcare,
+                weight_overrides=None,
+                shuffle_within_top=True,
+                random_state=43,
+                include_keywords=keywords,
+                exclude_keywords=exclude_keywords,
+            )
+
+            if len(fill):
+                playlist_df = pd.concat([playlist_df, fill], ignore_index=True)
+
+
+        # ----------------------------
+        # PASS C (Discovery): fill using "bridge genres" extracted from current results
+        # Keeps audio params/ranges fixed, expands only semantically via genres appearing in results.
+        # ----------------------------
+        if len(playlist_df) < TARGET and len(playlist_df) > 0:
+            already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
+
+            bridge_genres = _bridge_genres_from_results(
+                playlist_df,
+                exclude_genres=exclude_genres,
+                already_included_genres=include_genres_final,  # manual + region
+                top_n=25,
+            )
+
+            seed_artists = _seed_artists_from_results(playlist_df, top_n=20)
+
+            if bridge_genres or seed_artists:
+                need = TARGET - len(playlist_df)
+                if need > 0:
+                    fill2 = recommender.recommend_from_pool(
+                        user_input=user_input,
+                        pool_idx=pool_idx_wide,            # <-- KEY: wide pool
+                        k=need,                            # <-- only missing
+                        max_per_artist=2,
+                        include_artists=seed_artists,
+                        include_genres=bridge_genres,
+                        include_mode="prefer",
+                        exclude_artists=exclude_artists,
+                        exclude_genres=exclude_genres,
+                        exclude_track_ids=already,
+                        allow_explicit=allow_explicit,
+                        dontcare=dontcare,
+                        weight_overrides=None,
+                        shuffle_within_top=True,
+                        random_state=44,
+                        include_keywords=keywords,
+                        exclude_keywords=exclude_keywords,
+                    )
+
+                    if len(fill2):
+                        playlist_df = pd.concat([playlist_df, fill2], ignore_index=True)
 
 
         playlist_df = _sort_and_dedup(playlist_df).head(50).reset_index(drop=True)
@@ -576,6 +825,19 @@ def generate():
 
         msg = f"Similar to: <strong>{selected_label}</strong> ({len(playlist_df)} tracks).{extra}"
 
+
+        # ---- DEBUG GENERI EXTRA ----
+        extra_genres = _debug_genres_not_in_filters(
+            playlist_df,
+            include_genres=include_genres_final,
+            exclude_genres=exclude_genres,
+        )
+
+        if extra_genres:
+            print("GENERI EMERSI NON NEI FILTRI:")
+            for g in extra_genres:
+                print("  -", g)
+
         return render_template(
             "discovery/index.html",
             genres=genres_top,
@@ -603,13 +865,23 @@ def generate():
         "time_signature": _get_float("time_signature", 4.0),
     }
 
+
+    universe_idx = recommender.build_universe_indices(
+        include_artists=artists,
+        include_genres=include_genres_final,
+        exclude_artists=exclude_artists,
+        exclude_genres=exclude_genres,
+    )
+
+
     # 1) Build a BIG pool from preset-like ranges (soft, but tempo can be HARD)
     pool_df = recommender.build_pool(
         user_input=user_input,
+        universe_idx=universe_idx,   # <--- FIX
         ranges=ranges,
-        lock_tempo=lock_tempo,          # True iff tempo range provided
+        lock_tempo=lock_tempo,
         allow_explicit=allow_explicit,
-        exclude_track_ids=set(),        # custom mode: nothing to exclude by id
+        exclude_track_ids=set(),
         shuffle_within_top=True,
         random_state=42,
         dontcare=dontcare,
@@ -622,27 +894,140 @@ def generate():
     pool_idx = pool_df["_row_idx"].to_numpy()
 
 
-    # 2) Second stage: apply preferences INSIDE the pool
-    playlist_df = recommender.recommend_from_pool(
-        user_input=user_input,
-        pool_idx=pool_idx,
-        k=50,
-        max_per_artist=2,
+    TARGET = 50
+
+    # ----------------------------
+    # WIDE POOL (for PASS C semantic bridge)
+    # ----------------------------
+    universe_idx_wide = recommender.build_universe_indices(
         include_artists=artists,
-        include_genres=include_genres_final,
-        include_mode="prefer",          # discovery behavior: don't shrink pool
+        include_genres=[],         # <-- KEY
         exclude_artists=exclude_artists,
         exclude_genres=exclude_genres,
-        exclude_track_ids={track_id},   # keep it out even after ranking
-        allow_explicit=allow_explicit,
-        dontcare=dontcare,
-        weight_overrides=None,
-        shuffle_within_top=True,
-        random_state=42,
-        include_keywords=keywords,
-        exclude_keywords=exclude_keywords,
-
     )
+
+    pool_df_wide = recommender.build_pool(
+        user_input=user_input,
+        universe_idx=universe_idx_wide,
+        ranges=ranges,
+        lock_tempo=lock_tempo,
+        allow_explicit=allow_explicit,
+        exclude_track_ids=set(),
+        shuffle_within_top=True,
+        random_state=41,
+        dontcare=dontcare,
+    )
+
+    if "_row_idx" not in pool_df_wide.columns:
+        raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
+
+    pool_idx_wide = pool_df_wide["_row_idx"].to_numpy()
+
+
+    # ----------------------------
+    # PASS A: "force selected buckets" (OR) + relax max_per_artist if needed
+    # ----------------------------
+    playlist_df = pd.DataFrame()
+    picked_ids = set()
+
+    for cap in [2, 4, 8, 12]:
+        tmp = recommender.recommend_from_pool(
+            user_input=user_input,
+            pool_idx=pool_idx,
+            k=TARGET,
+            max_per_artist=cap,
+            include_artists=artists,
+            include_genres=include_genres_final,
+            include_mode="must_any",          # <-- NEW MODE (OR)
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+            exclude_track_ids=set(),          # (seed track exclusion handled in build_pool already)
+            allow_explicit=allow_explicit,
+            dontcare=dontcare,
+            weight_overrides=None,
+            shuffle_within_top=True,
+            random_state=42,
+            include_keywords=keywords,
+            exclude_keywords=exclude_keywords,
+        )
+
+        if len(tmp) > len(playlist_df):
+            playlist_df = tmp
+
+        if len(playlist_df) >= TARGET:
+            break
+
+    # ----------------------------
+    # PASS B: fill to TARGET from the same pool, without forcing buckets
+    # ----------------------------
+    if len(playlist_df) < TARGET:
+        already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
+
+        fill = recommender.recommend_from_pool(
+            user_input=user_input,
+            pool_idx=pool_idx,
+            k=TARGET,
+            max_per_artist=2,
+            include_artists=[],
+            include_genres=[],
+            include_mode="prefer",            # no forced buckets
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+            exclude_track_ids=already,        # don't duplicate
+            allow_explicit=allow_explicit,
+            dontcare=dontcare,
+            weight_overrides=None,
+            shuffle_within_top=True,
+            random_state=43,
+            include_keywords=keywords,
+            exclude_keywords=exclude_keywords,
+        )
+
+        if len(fill):
+            playlist_df = pd.concat([playlist_df, fill], ignore_index=True)
+
+
+    # ----------------------------
+    # PASS C (Discovery): fill using "bridge genres" extracted from current results
+    # Keeps audio params/ranges fixed, expands only semantically via genres appearing in results.
+    # ----------------------------
+    if len(playlist_df) < TARGET and len(playlist_df) > 0:
+        already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
+
+        bridge_genres = _bridge_genres_from_results(
+            playlist_df,
+            exclude_genres=exclude_genres,
+            already_included_genres=include_genres_final,  # manual + region
+            top_n=25,
+        )
+
+        seed_artists = _seed_artists_from_results(playlist_df, top_n=20)
+
+        if bridge_genres or seed_artists:
+            need = TARGET - len(playlist_df)
+            if need > 0:
+                fill2 = recommender.recommend_from_pool(
+                    user_input=user_input,
+                    pool_idx=pool_idx_wide,            # <-- KEY: wide pool
+                    k=need,                            # <-- only missing
+                    max_per_artist=2,
+                    include_artists=seed_artists,
+                    include_genres=bridge_genres,
+                    include_mode="prefer",
+                    exclude_artists=exclude_artists,
+                    exclude_genres=exclude_genres,
+                    exclude_track_ids=already,
+                    allow_explicit=allow_explicit,
+                    dontcare=dontcare,
+                    weight_overrides=None,
+                    shuffle_within_top=True,
+                    random_state=44,
+                    include_keywords=keywords,
+                    exclude_keywords=exclude_keywords,
+                )
+
+                if len(fill2):
+                    playlist_df = pd.concat([playlist_df, fill2], ignore_index=True)
 
 
     playlist_df = _sort_and_dedup(playlist_df).head(50).reset_index(drop=True)

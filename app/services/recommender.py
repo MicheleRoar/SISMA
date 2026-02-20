@@ -313,7 +313,7 @@ class PlaylistRecommender:
         dontcare: Optional[Dict[str, bool]] = None,
         include_artists: Optional[List[str]] = None,
         include_genres: Optional[List[str]] = None,
-        include_mode: str = "prefer",   # "must" | "prefer"
+        include_mode: str = "prefer",   # "must" | "must_any" | "prefer"
         prefer_strength: float = 0.18,  # (non usato nel two-pass, tenuto per compatibilità)
         exclude_artists: Optional[List[str]] = None,
         exclude_genres: Optional[List[str]] = None,
@@ -365,11 +365,33 @@ class PlaylistRecommender:
             return np.unique(np.concatenate(parts).astype(np.int64)) if parts else np.array([], dtype=np.int64)
 
         inc_mode = (include_mode or "prefer").strip().lower()
-        if inc_mode not in {"must", "prefer"}:
+        if inc_mode not in {"must", "must_any", "prefer"}:
             inc_mode = "prefer"
 
         inc_artist_idx = _union_artist_idx(include_artists)
         inc_genre_idx = _union_genre_idx(include_genres)
+
+
+
+        # include_mode="must_any": HARD filter (OR) inside pool
+        if inc_mode == "must_any":
+            keep = np.array([], dtype=np.int64)
+
+            if include_artists and inc_artist_idx.size:
+                keep = inc_artist_idx if keep.size == 0 else np.union1d(keep, inc_artist_idx)
+
+            if include_genres and inc_genre_idx.size:
+                keep = inc_genre_idx if keep.size == 0 else np.union1d(keep, inc_genre_idx)
+
+            # Se l'utente ha chiesto qualcosa ma non c'è match, torna vuoto (così Discovery può fare fallback)
+            if (include_artists or include_genres) and keep.size == 0:
+                return pd.DataFrame()
+
+            if keep.size:
+                idx = np.intersect1d(idx, keep)
+                if idx.size == 0:
+                    return pd.DataFrame()
+
 
         # include_mode="must": HARD filter inside pool
         if inc_mode == "must":
@@ -441,10 +463,6 @@ class PlaylistRecommender:
             pool_size = min(len(local_idx), max(int(need) * self.config.pool_multiplier, self.config.min_pool))
             top_local = self._topk_indices(dloc, pool_size)
             top_global = local_idx[top_local]
-
-            if shuffle_within_top:
-                rng = np.random.default_rng(random_state)
-                rng.shuffle(top_global)
 
             return self._apply_constraints(
                 top_global,
