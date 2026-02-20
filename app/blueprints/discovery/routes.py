@@ -293,7 +293,7 @@ def _apply_similarity_blend(user_input: Dict[str, float]) -> Dict[str, float]:
     for f in ["danceability", "energy", "instrumentalness", "valence"]:
         blend_feature(f, alpha_main, use_dc=True)
 
-    for f in ["acousticness", "speechiness", "liveness", "tempo", "loudness"]:
+    for f in ["acousticness", "speechiness", "liveness", "loudness"]:
         blend_feature(f, alpha_adv, use_dc=False)
 
     # discrete overrides
@@ -496,6 +496,11 @@ def generate():
     recommender = current_app.config["RECOMMENDER"]
     store = current_app.config["DATASTORE"]
 
+    # 🔎 STEP 1 DEBUG — cosa arriva davvero dal form
+    current_app.logger.info("=== GENERATE QUERY START ===")
+    current_app.logger.info(dict(request.args))
+    current_app.logger.info("=== GENERATE QUERY END ===")
+
     track_id = (request.args.get("track_id") or "").strip()
     region_isos_raw = (request.args.get("region_isos") or "").strip()
     allow_explicit = (request.args.get("allow_explicit", "0") == "1")
@@ -596,6 +601,10 @@ def generate():
         "instrumentalness": request.args.get("dc_instrumentalness", "0") == "1",
         "valence": request.args.get("dc_valence", "0") == "1",
     }
+
+    tempo_raw = (request.args.get("tempo") or "").strip()
+    tempo_range_specified = ("tempo" in ranges)  # tempo_min/max provided
+    dontcare["tempo"] = (not tempo_range_specified) and (tempo_raw == "")
 
     # ----------------------------
     # Bucket weights (PATCH)
@@ -858,13 +867,15 @@ def generate():
         "acousticness": _get_float("acousticness", 0.2),
         "speechiness": _get_float("speechiness", 0.1),
         "liveness": _get_float("liveness", 0.1),
-        "tempo": _get_float("tempo", 120.0),
         "loudness": _get_float("loudness", -10.0),
         "key": _get_float("key", 0.0),
         "mode": _get_float("mode", 1.0),
         "time_signature": _get_float("time_signature", 4.0),
     }
 
+    # tempo enters user_input ONLY if user explicitly set it OR set a tempo range
+    if tempo_raw != "" or tempo_range_specified:
+        user_input["tempo"] = _get_float("tempo", 120.0)
 
     universe_idx = recommender.build_universe_indices(
         include_artists=artists,
@@ -887,6 +898,9 @@ def generate():
         dontcare=dontcare,
     )
 
+    current_app.logger.info(f"POOL strict size: {len(pool_df)}")
+
+
     # pool indices for second-stage filtering/ranking
     if "_row_idx" not in pool_df.columns:
         raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
@@ -900,7 +914,7 @@ def generate():
     # WIDE POOL (for PASS C semantic bridge)
     # ----------------------------
     universe_idx_wide = recommender.build_universe_indices(
-        include_artists=artists,
+        include_artists=[],
         include_genres=[],         # <-- KEY
         exclude_artists=exclude_artists,
         exclude_genres=exclude_genres,
@@ -917,6 +931,9 @@ def generate():
         random_state=41,
         dontcare=dontcare,
     )
+
+    current_app.logger.info(f"POOL wide size: {len(pool_df_wide)}")
+
 
     if "_row_idx" not in pool_df_wide.columns:
         raise RuntimeError("build_pool must return a '_row_idx' column (update recommender.py)")
@@ -957,6 +974,8 @@ def generate():
         if len(playlist_df) >= TARGET:
             break
 
+    current_app.logger.info(f"PASS A size: {len(playlist_df)}")
+
     # ----------------------------
     # PASS B: fill to TARGET from the same pool, without forcing buckets
     # ----------------------------
@@ -986,6 +1005,7 @@ def generate():
         if len(fill):
             playlist_df = pd.concat([playlist_df, fill], ignore_index=True)
 
+    current_app.logger.info(f"PASS B size: {len(playlist_df)}")
 
     # ----------------------------
     # PASS C (Discovery): fill using "bridge genres" extracted from current results
@@ -1029,8 +1049,67 @@ def generate():
                 if len(fill2):
                     playlist_df = pd.concat([playlist_df, fill2], ignore_index=True)
 
+    current_app.logger.info(f"PASS C size: {len(playlist_df)}")
 
-    playlist_df = _sort_and_dedup(playlist_df).head(50).reset_index(drop=True)
+    # --- FINALIZE: dedup then refill to TARGET ---
+    playlist_df = _sort_and_dedup(playlist_df)
+
+    missing = TARGET - len(playlist_df)
+    if missing > 0:
+        already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
+
+        refill = recommender.recommend_from_pool(
+            user_input=user_input,
+            pool_idx=pool_idx_wide,
+            k=missing,
+            max_per_artist=2,
+            include_artists=[],
+            include_genres=[],
+            include_mode="prefer",
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+            exclude_track_ids=already,
+            allow_explicit=allow_explicit,
+            dontcare=dontcare,
+            weight_overrides=None,
+            shuffle_within_top=True,
+            random_state=45,
+            include_keywords=keywords,
+            exclude_keywords=exclude_keywords,
+        )
+
+        if len(refill):
+            playlist_df = pd.concat([playlist_df, refill], ignore_index=True)
+            playlist_df = _sort_and_dedup(playlist_df)
+
+    # 1) quality gate: keep top 50 by popularity (after final dedup/refill)
+    if "popularity" in playlist_df.columns:
+        playlist_df["popularity"] = pd.to_numeric(playlist_df["popularity"], errors="coerce").fillna(0)
+        playlist_df = playlist_df.sort_values("popularity", ascending=False)
+
+    playlist_df = playlist_df.head(50).copy()
+
+    # 2) listening flow: BPM ascending (tie-breakers preserve quality)
+    if "bpm" in playlist_df.columns:
+        playlist_df["bpm"] = pd.to_numeric(playlist_df["bpm"], errors="coerce")
+        sort_cols = ["bpm"]
+        asc = [True]
+
+        if "match" in playlist_df.columns:
+            playlist_df["match"] = pd.to_numeric(playlist_df["match"], errors="coerce").fillna(0)
+            sort_cols.append("match")
+            asc.append(False)
+        if "popularity" in playlist_df.columns:
+            sort_cols.append("popularity")
+            asc.append(False)
+
+        playlist_df = playlist_df.sort_values(sort_cols, ascending=asc, na_position="last")
+
+    playlist_df = playlist_df.reset_index(drop=True)
+
+
+
+
 
     if request.args.get("format", "").lower() == "json":
         return jsonify(playlist_df.to_dict(orient="records"))
