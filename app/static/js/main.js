@@ -1821,3 +1821,44 @@ function toggleGenreUIForRegionMode() {
   });
 })();
 
+function showLoader() {
+  const el = document.getElementById("loading-screen");
+  if (!el) return;
+  el.classList.remove("is-hidden");
+  el.setAttribute("aria-hidden", "false");
+}
+
+function hideLoader() {
+  const el = document.getElementById("loading-screen");
+  if (!el) return;
+  el.classList.add("is-hidden");
+  el.setAttribute("aria-hidden", "true");
+}
+
+// --- Discovery: show loader on playlist generate (server roundtrip) ---
+(function () {
+  const form = document.getElementById("playlist_form");
+  if (!form) return;
+
+  // 1) Mostra loader quando l'utente genera la playlist
+  form.addEventListener("submit", () => {
+    showLoader();
+  });
+
+  // 2) Quando la pagina (nuova) è pronta, nascondi loader.
+  // Funziona sia se ci sono risultati, sia se c'è solo la hint.
+  window.addEventListener("load", () => {
+    hideLoader();
+  });
+
+  // 3) Safari/Firefox bfcache: tornando indietro può "riesumare" il loader visibile
+  window.addEventListener("pageshow", (e) => {
+    hideLoader();
+  });
+})();
+
+form.addEventListener("submit", () => {
+  showLoader();
+  const btn = form.querySelector('button[type="submit"]');
+  if (btn) btn.disabled = true;
+});

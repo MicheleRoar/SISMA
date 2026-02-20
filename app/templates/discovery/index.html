@@ -8,7 +8,6 @@
 </head>
 
 <body>
-  <main class="wrap">
 
   <header class="planner-header">
   <div class="brand">
@@ -575,6 +574,19 @@
             Download preset template
           </button>
         </div>
+
+
+        <div id="loading-screen" class="loading-screen is-hidden">
+          <div class="loading-box">
+            <img
+              src="{{ url_for('static', filename='img/drum.gif') }}"
+              class="loading-gif"
+              alt="Loading"
+            >
+            <div class="loading-text">Generating Playlist</div>
+          </div>
+        </div>
+
 
       </form>
     </section>
