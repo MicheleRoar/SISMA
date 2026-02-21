@@ -479,6 +479,7 @@ def index():
         "allow_explicit": 0,
         "keywords": "",
         "exclude_keywords": "",
+        "popularity_tier": "",
     }
 
     return render_template(
@@ -573,6 +574,8 @@ def generate():
 
         return mn, mx
 
+    ranges = {}
+
     RANGE_FEATURES = [
         "danceability",
         "energy",
@@ -586,7 +589,20 @@ def generate():
         "year",
     ]
 
-    ranges = {}
+    # -----------------------------
+    # Popularity tier (dropdown)
+    # -----------------------------
+    tier = (request.args.get("popularity_tier") or "").strip().lower()
+
+    TIER_TO_RANGE = {
+        "mainstream": (80, 100),
+        "balanced":   (40, 100),
+        "niche":      (15, 60),
+        "deep":       (0, 25),
+        "":           (None, None),  # None => off
+    }
+
+
     for f in RANGE_FEATURES:
         mn, mx = _get_range(f)
         if (mn is not None) or (mx is not None):
@@ -605,6 +621,16 @@ def generate():
     tempo_raw = (request.args.get("tempo") or "").strip()
     tempo_range_specified = ("tempo" in ranges)  # tempo_min/max provided
     dontcare["tempo"] = (not tempo_range_specified) and (tempo_raw == "")
+
+    # If user did NOT explicitly touch discrete fields, ignore them in ranking
+    ts_raw = (request.args.get("time_signature") or "").strip()
+    dontcare["time_signature"] = (ts_raw == "")
+
+    key_raw = (request.args.get("key") or "").strip()
+    dontcare["key"] = (key_raw == "")
+
+    mode_raw = (request.args.get("mode") or "").strip()
+    dontcare["mode"] = (mode_raw == "")
 
     # ----------------------------
     # Bucket weights (PATCH)
@@ -649,6 +675,8 @@ def generate():
             shuffle_within_top=True,
             random_state=42,
             dontcare=dontcare,
+            popularity_tier=tier,
+            popularity_genres=genres_list,  # manual only, non include_genres_final
         )
 
         if "_row_idx" not in pool_df.columns:
@@ -680,6 +708,8 @@ def generate():
             shuffle_within_top=True,
             random_state=41,
             dontcare=dontcare,
+            popularity_tier=tier,
+            popularity_genres=genres_list,  # manual only, non include_genres_final
         )
 
         if "_row_idx" not in pool_df_wide.columns:
@@ -812,7 +842,7 @@ def generate():
             "allow_explicit": 1 if allow_explicit else 0,
             "keywords": keywords_raw,
             "exclude_keywords": exclude_keywords_raw,
-
+            "popularity_tier": tier or "",
 
         }
 
@@ -896,6 +926,8 @@ def generate():
         shuffle_within_top=True,
         random_state=42,
         dontcare=dontcare,
+        popularity_tier=tier,
+        popularity_genres=genres_list,  # manual only, non include_genres_final
     )
 
     current_app.logger.info(f"POOL strict size: {len(pool_df)}")
@@ -930,6 +962,8 @@ def generate():
         shuffle_within_top=True,
         random_state=41,
         dontcare=dontcare,
+        popularity_tier=tier,
+        popularity_genres=genres_list,  # manual only, non include_genres_final
     )
 
     current_app.logger.info(f"POOL wide size: {len(pool_df_wide)}")
@@ -1127,7 +1161,7 @@ def generate():
         "allow_explicit": 1 if allow_explicit else 0,
         "keywords": keywords_raw,
         "exclude_keywords": exclude_keywords_raw,
-
+        "popularity_tier": tier or "",
     }
     for f in RANGE_FEATURES:
         mn, mx = ranges.get(f, (None, None))

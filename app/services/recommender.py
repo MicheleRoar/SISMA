@@ -692,6 +692,8 @@ class PlaylistRecommender:
         target_ranges: Dict[str, Tuple[Optional[float], Optional[float]]],
         k: int,
         lock_tempo: bool = False,
+        popularity_tier: str = "",
+        popularity_genres: Optional[List[str]] = None,
     ) -> Tuple[np.ndarray, Dict[str, Tuple[float, float]]]:
         """
         Expand non-tempo first; tempo last (unless lock_tempo=True).
@@ -958,6 +960,188 @@ class PlaylistRecommender:
 
         return universe.astype(np.int64)
 
+
+    def _tier_to_percentiles(self, tier: str) -> Tuple[Optional[float], Optional[float]]:
+        """
+        Returns (p_low, p_high) in [0..1] percentiles.
+        None means open bound.
+        """
+        t = (tier or "").strip().lower()
+        if t == "mainstream":
+            return (0.80, 1.00)   # top 20% within scope
+        if t == "balanced":
+            return (0.40, 1.00)   # top 60%
+        if t == "niche":
+            return (0.15, 0.60)   # mid-low popularity
+        if t in {"deep", "discovery"}:
+            return (0.00, 0.25)   # bottom 25%
+        return (None, None)
+
+    def _apply_popularity_tier(
+        self,
+        idx: np.ndarray,
+        *,
+        tier: str,
+        pool_size: int,
+        genres_manual: Optional[List[str]] = None,
+    ) -> np.ndarray:
+        """
+        Popularity filter:
+        - If NO manual genres: ABSOLUTE on whole idx (thresholds in 0..100).
+        - If manual genres present: RELATIVE per genre (percentiles within each genre slice),
+          then quota-mix union of candidates.
+        """
+        idx = np.asarray(idx, dtype=np.int64)
+        if idx.size == 0:
+            return idx
+
+        tier = (tier or "").strip().lower()
+        if not tier:
+            return idx
+
+        if "popularity" not in self.df.columns:
+            return idx
+
+        pop_all = pd.to_numeric(self.df["popularity"], errors="coerce").fillna(0).to_numpy(dtype=float)
+
+        # ----------------------------
+        # ABSOLUTE mode (no manual genres)
+        # ----------------------------
+        gman = [str(g).strip() for g in (genres_manual or []) if str(g).strip()]
+        if not gman:
+            # thresholds in 0..100
+            abs_map = {
+                "mainstream": (80, 100),
+                "balanced":   (40, 100),
+                "niche":      (15, 60),
+                "deep":       (0, 25),
+                "discovery":  (0, 25),
+            }
+            mn, mx = abs_map.get(tier, (None, None))
+            mask = np.ones(idx.size, dtype=bool)
+            if mn is not None:
+                mask &= (pop_all[idx] >= float(mn))
+            if mx is not None:
+                mask &= (pop_all[idx] <= float(mx))
+            return idx[mask]
+
+        # ----------------------------
+        # RELATIVE per-genre mode (manual genres)
+        # Normalize popularity to 0..100 *within each selected genre*
+        # then apply tier thresholds on that normalized scale.
+        # Also quota-mix across genres (25/25, 17/17/16, ...)
+        # ----------------------------
+        tier = (tier or "").strip().lower()
+        band_map = {
+            "mainstream": (80, 100),
+            "balanced":   (40, 100),
+            "niche":      (15, 60),
+            "deep":       (0, 25),
+            "discovery":  (0, 25),
+        }
+        mn_norm, mx_norm = band_map.get(tier, (None, None))
+        if mn_norm is None and mx_norm is None:
+            return idx
+
+        # exact quotas: 50 with 2 genres => 25/25; 3 => 17/17/16, etc.
+        G = len(gman)
+        base = int(pool_size) // G
+        rem = int(pool_size) - base * (G - 1)
+        quotas = [base] * (G - 1) + [rem]
+
+        picked_chunks = []
+
+        for i, g in enumerate(gman):
+            g_idx = np.asarray(self.store.get_row_indices_by_genre(g), dtype=np.int64)
+            if g_idx.size == 0:
+                continue
+
+            # intersect with incoming idx
+            g_idx = g_idx[np.isin(g_idx, idx)]
+            if g_idx.size == 0:
+                continue
+
+            gp = pop_all[g_idx]
+            if gp.size == 0:
+                continue
+
+            gmin = float(np.min(gp))
+            gmax = float(np.max(gp))
+
+            # if genre has flat popularity (all equal), treat all as norm=100 (or 0, but 100 makes more sense)
+            if (gmax - gmin) < 1e-9:
+                gp_norm = np.full(gp.shape, 100.0, dtype=float)
+            else:
+                gp_norm = 100.0 * (gp - gmin) / (gmax - gmin)
+
+            mask = np.ones(g_idx.size, dtype=bool)
+            if mn_norm is not None:
+                mask &= (gp_norm >= float(mn_norm))
+            if mx_norm is not None:
+                mask &= (gp_norm <= float(mx_norm))
+
+            keep = g_idx[mask]
+            if keep.size == 0:
+                continue
+
+            # within the tier band, take the *most popular* originals (or most norm, same order usually)
+            kp = pop_all[keep]
+            order = np.argsort(-kp)
+            quota = int(quotas[i])
+            keep = keep[order][:quota]
+
+            picked_chunks.append(keep)
+
+        if not picked_chunks:
+            # fallback: if nothing survives per-genre normalization, just return original idx (no tier)
+            # or do a global-tier fallback if you prefer
+            return idx
+
+        merged = np.concatenate(picked_chunks).astype(np.int64)
+
+        # dedup preserving order (important if tracks appear under multiple genres)
+        seen = set()
+        dedup = []
+        for x in merged.tolist():
+            if x not in seen:
+                seen.add(x)
+                dedup.append(x)
+        merged = np.asarray(dedup, dtype=np.int64)
+
+        # top-up if we lost too many due to dedup or sparse genres
+        if merged.size < min(int(pool_size), 400):
+            # global fallback inside idx using SAME normalized trick but across all idx:
+            p = pop_all[idx]
+            pmin = float(np.min(p)) if p.size else 0.0
+            pmax = float(np.max(p)) if p.size else 1.0
+            if (pmax - pmin) < 1e-9:
+                p_norm = np.full(p.shape, 100.0, dtype=float)
+            else:
+                p_norm = 100.0 * (p - pmin) / (pmax - pmin)
+
+            mask = np.ones(idx.size, dtype=bool)
+            if mn_norm is not None:
+                mask &= (p_norm >= float(mn_norm))
+            if mx_norm is not None:
+                mask &= (p_norm <= float(mx_norm))
+
+            extra = idx[mask]
+            # add most popular first
+            order = np.argsort(-pop_all[extra])
+            extra = extra[order]
+
+            for x in extra.tolist():
+                if x not in seen:
+                    seen.add(x)
+                    dedup.append(x)
+                if len(dedup) >= int(pool_size):
+                    break
+
+            merged = np.asarray(dedup, dtype=np.int64)
+
+        return merged.astype(np.int64)
+
+
     def build_pool(
         self,
         *,
@@ -971,8 +1155,9 @@ class PlaylistRecommender:
         dontcare: Optional[Dict[str, bool]] = None,
         weight_overrides: Optional[Dict[str, float]] = None,
         ranges: Optional[Dict[str, Tuple[Optional[float], Optional[float]]]] = None,
-        # NEW: Planner controls
         lock_tempo: bool = False,
+        popularity_tier: str = "",
+        popularity_genres: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         exclude_track_ids = exclude_track_ids or set()
         pool_size = int(max(50, pool_size))
@@ -983,6 +1168,19 @@ class PlaylistRecommender:
             else np.arange(len(self.df), dtype=np.int64)
         )
         idx = self._filter_explicit_indices(idx, allow_explicit=allow_explicit)
+
+        # -----------------------------
+        # Popularity tier: absolute (no manual genres) OR relative per selected genres
+        # This happens BEFORE range engine & distance ranking.
+        # -----------------------------
+        idx = self._apply_popularity_tier(
+            idx,
+            tier=popularity_tier,
+            pool_size=pool_size,
+            genres_manual=popularity_genres,
+        )
+        if idx.size == 0:
+            return pd.DataFrame()
 
         ranges = ranges or {}
         target_ranges = self._normalize_ranges(ranges)

@@ -485,13 +485,13 @@
             </div>
 
             <div class="row">
-              <label for="time_signature"><strong>Time signature</strong></label>
-              <select id="time_signature" name="time_signature">
-                {% for ts in [3,4,5,6,7] %}
-                  <option value="{{ ts }}" {% if defaults.get("time_signature", 4)|int == ts %}selected{% endif %}>
-                {{ ts }}/4
-              </option> 
-                {% endfor %}
+              <label for="popularity_tier"><strong>Popularity</strong></label>
+              <select id="popularity_tier" name="popularity_tier">
+                <option value="" {% if (defaults.get("popularity_tier","") == "") %}selected{% endif %}>None</option>
+                <option value="mainstream" {% if defaults.get("popularity_tier","") == "mainstream" %}selected{% endif %}>Mainstream</option>
+                <option value="balanced" {% if defaults.get("popularity_tier","") == "balanced" %}selected{% endif %}>Balanced</option>
+                <option value="niche" {% if defaults.get("popularity_tier","") == "niche" %}selected{% endif %}>Niche</option>
+                <option value="deep" {% if defaults.get("popularity_tier","") == "deep" %}selected{% endif %}>Deep cuts</option>
               </select>
             </div>
 
