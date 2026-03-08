@@ -485,7 +485,7 @@ def index():
     return render_template(
         "discovery/index.html",
         genres=genres_top,
-        presets=sorted(PRESETS.keys()),
+        presets=list(PRESETS.keys()),
         defaults=defaults,
         results=None,
         message="",
@@ -496,8 +496,9 @@ def index():
 def generate():
     recommender = current_app.config["RECOMMENDER"]
     store = current_app.config["DATASTORE"]
+    preset = (request.args.get("preset") or "").strip()
 
-    # 🔎 STEP 1 DEBUG — cosa arriva davvero dal form
+    # DEBUG — cosa arriva davvero dal form
     current_app.logger.info("=== GENERATE QUERY START ===")
     current_app.logger.info(dict(request.args))
     current_app.logger.info("=== GENERATE QUERY END ===")
@@ -754,31 +755,32 @@ def generate():
         # ----------------------------
         # PASS B: fill to TARGET from the same pool, without forcing buckets
         # ----------------------------
-        if len(playlist_df) < TARGET:
+        missing = TARGET - len(playlist_df)
+        if missing > 0:
             already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
 
-            fill = recommender.recommend_from_pool(
+            refill_sem = recommender.recommend_from_pool(
                 user_input=user_input,
-                pool_idx=pool_idx,
-                k=TARGET,
-                max_per_artist=2,
-                include_artists=[],
-                include_genres=[],
-                include_mode="prefer",            # no forced buckets
+                pool_idx=pool_idx_wide,
+                k=missing,
+                max_per_artist=4,
+                include_artists=artists or [],
+                include_genres=include_genres_final or [],
+                include_mode="must_any",          # <-- niente intrusi anche nel wide
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
-                exclude_track_ids=already,        # don't duplicate
+                exclude_track_ids=already,
                 allow_explicit=allow_explicit,
                 dontcare=dontcare,
-                weight_overrides=None,
                 shuffle_within_top=True,
-                random_state=43,
+                random_state=45,
                 include_keywords=keywords,
                 exclude_keywords=exclude_keywords,
             )
 
-            if len(fill):
-                playlist_df = pd.concat([playlist_df, fill], ignore_index=True)
+            if len(refill_sem):
+                playlist_df = pd.concat([playlist_df, refill_sem], ignore_index=True)
+                playlist_df = _sort_and_dedup(playlist_df)
 
 
         # ----------------------------
@@ -804,7 +806,7 @@ def generate():
                         user_input=user_input,
                         pool_idx=pool_idx_wide,            # <-- KEY: wide pool
                         k=need,                            # <-- only missing
-                        max_per_artist=2,
+                        max_per_artist=4,
                         include_artists=seed_artists,
                         include_genres=bridge_genres,
                         include_mode="prefer",
@@ -844,8 +846,10 @@ def generate():
             "exclude_keywords": exclude_keywords_raw,
             "popularity_tier": tier or "",
 
+
         }
 
+        defaults["preset"] = preset
         for f in RANGE_FEATURES:
             mn, mx = ranges.get(f, (None, None))
             if mn is not None:
@@ -880,7 +884,7 @@ def generate():
         return render_template(
             "discovery/index.html",
             genres=genres_top,
-            presets=sorted(PRESETS.keys()),
+            presets=list(PRESETS.keys()),
             defaults=defaults,
             results=playlist_df.to_dict(orient="records"),
             message=msg,
@@ -976,23 +980,65 @@ def generate():
 
 
     # ----------------------------
-    # PASS A: "force selected buckets" (OR) + relax max_per_artist if needed
+    # PASS A (artist-first):
+    # A0) force artists only (HARD) if artists selected
+    # A1) then force selected buckets (OR) to add genre coherence
     # ----------------------------
     playlist_df = pd.DataFrame()
-    picked_ids = set()
 
-    for cap in [2, 4, 8, 12]:
-        tmp = recommender.recommend_from_pool(
+    CAPS = [2, 4, 8, 12]
+
+    # A0 — artist-only guarantee (se l'utente ha selezionato artisti)
+    if artists:
+        best_a0 = pd.DataFrame()
+
+        for cap in CAPS:
+            tmp_a0 = recommender.recommend_from_pool(
+                user_input=user_input,
+                pool_idx=pool_idx,
+                k=TARGET,
+                max_per_artist=cap,
+                include_artists=artists,
+                include_genres=[],
+                include_mode="must",                 # HARD: deve essere dell'artista
+                exclude_artists=exclude_artists,
+                exclude_genres=exclude_genres,
+                exclude_track_ids=set(),
+                allow_explicit=allow_explicit,
+                dontcare=dontcare,
+                weight_overrides=None,
+                shuffle_within_top=True,
+                random_state=40 + cap,
+                include_keywords=keywords,
+                exclude_keywords=exclude_keywords,
+            )
+
+            if len(tmp_a0) > len(best_a0):
+                best_a0 = tmp_a0
+
+            # stop early se già riempiamo una buona quota
+            if len(best_a0) >= min(12, TARGET):
+                break
+
+        if len(best_a0):
+            playlist_df = best_a0.copy()
+
+    # A1 — selected buckets OR (come prima), ma senza duplicati
+    best_a1 = playlist_df
+    already = set(best_a1["track_id"].astype(str)) if ("track_id" in best_a1.columns and len(best_a1)) else set()
+
+    for cap in CAPS:
+        tmp_a1 = recommender.recommend_from_pool(
             user_input=user_input,
             pool_idx=pool_idx,
             k=TARGET,
             max_per_artist=cap,
             include_artists=artists,
             include_genres=include_genres_final,
-            include_mode="must_any",          # <-- NEW MODE (OR)
+            include_mode="must_any",               # OR: artisti o generi
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
-            exclude_track_ids=set(),          # (seed track exclusion handled in build_pool already)
+            exclude_track_ids=already,             # non ripetere
             allow_explicit=allow_explicit,
             dontcare=dontcare,
             weight_overrides=None,
@@ -1002,42 +1048,45 @@ def generate():
             exclude_keywords=exclude_keywords,
         )
 
-        if len(tmp) > len(playlist_df):
-            playlist_df = tmp
+        if len(tmp_a1) > len(best_a1):
+            best_a1 = tmp_a1
 
-        if len(playlist_df) >= TARGET:
+        if len(best_a1) >= TARGET:
             break
+
+    playlist_df = best_a1
 
     current_app.logger.info(f"PASS A size: {len(playlist_df)}")
 
     # ----------------------------
     # PASS B: fill to TARGET from the same pool, without forcing buckets
     # ----------------------------
-    if len(playlist_df) < TARGET:
+    missing = TARGET - len(playlist_df)
+    if missing > 0:
         already = set(playlist_df["track_id"].astype(str)) if ("track_id" in playlist_df.columns) else set()
 
-        fill = recommender.recommend_from_pool(
+        refill_sem = recommender.recommend_from_pool(
             user_input=user_input,
-            pool_idx=pool_idx,
-            k=TARGET,
-            max_per_artist=2,
-            include_artists=[],
-            include_genres=[],
-            include_mode="prefer",            # no forced buckets
+            pool_idx=pool_idx_wide,
+            k=missing,
+            max_per_artist=4,
+            include_artists=artists or [],
+            include_genres=include_genres_final or [],
+            include_mode="must_any",          # <-- niente intrusi anche nel wide
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
-            exclude_track_ids=already,        # don't duplicate
+            exclude_track_ids=already,
             allow_explicit=allow_explicit,
             dontcare=dontcare,
-            weight_overrides=None,
             shuffle_within_top=True,
-            random_state=43,
+            random_state=45,
             include_keywords=keywords,
             exclude_keywords=exclude_keywords,
         )
 
-        if len(fill):
-            playlist_df = pd.concat([playlist_df, fill], ignore_index=True)
+        if len(refill_sem):
+            playlist_df = pd.concat([playlist_df, refill_sem], ignore_index=True)
+            playlist_df = _sort_and_dedup(playlist_df)
 
     current_app.logger.info(f"PASS B size: {len(playlist_df)}")
 
@@ -1064,7 +1113,7 @@ def generate():
                     user_input=user_input,
                     pool_idx=pool_idx_wide,            # <-- KEY: wide pool
                     k=need,                            # <-- only missing
-                    max_per_artist=2,
+                    max_per_artist=4,
                     include_artists=seed_artists,
                     include_genres=bridge_genres,
                     include_mode="prefer",
@@ -1096,7 +1145,7 @@ def generate():
             user_input=user_input,
             pool_idx=pool_idx_wide,
             k=missing,
-            max_per_artist=2,
+            max_per_artist=4,
             include_artists=[],
             include_genres=[],
             include_mode="prefer",
@@ -1163,6 +1212,7 @@ def generate():
         "exclude_keywords": exclude_keywords_raw,
         "popularity_tier": tier or "",
     }
+    defaults["preset"] = preset
     for f in RANGE_FEATURES:
         mn, mx = ranges.get(f, (None, None))
         if mn is not None:
@@ -1180,7 +1230,7 @@ def generate():
     return render_template(
         "discovery/index.html",
         genres=genres_top,
-        presets=sorted(PRESETS.keys()),
+        presets=list(PRESETS.keys()),
         defaults=defaults,
         results=playlist_df.to_dict(orient="records"),
         message=f"Generated playlist with {len(playlist_df)} tracks.{extra}",

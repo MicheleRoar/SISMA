@@ -57,9 +57,11 @@
 
           <div class="inline-actions">
             <select id="preset" name="preset">
-              <option value="">Custom</option>
+              <option value="" {% if not defaults.get("preset") %}selected{% endif %}>Custom</option>
               {% for p in presets %}
-                <option value="{{ p }}">{{ p }}</option>
+                <option value="{{ p }}" {% if defaults.get("preset") == p %}selected{% endif %}>
+                  {{ p }}
+                </option>
               {% endfor %}
             </select>
 
