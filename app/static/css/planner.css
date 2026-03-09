@@ -4,7 +4,7 @@
    =============================== */
 
 :root{
-  --time-col-w: 96px;
+  --time-col-w: 50px;
   --day-col-w: 112px;
   --row-h: 26px;
   --head-h: 46px;
@@ -256,6 +256,13 @@ details.mini summary{
   border-right:1px solid var(--line);
 }
 
+.cal-time-head,
+.cal-time-col{
+  width: var(--time-col-w);
+  min-width: var(--time-col-w);
+  max-width: var(--time-col-w);
+}
+
 .cal-days-head-clip{
   overflow:hidden;
 }
@@ -333,7 +340,6 @@ details.mini summary{
 
 /* overlay blocks layer: fused consecutive runs */
 .p-blocks{
-  margin-left: -15px;
   position:absolute;
   inset:0;
   pointer-events:none; /* clicks go to cells */
@@ -345,7 +351,7 @@ details.mini summary{
   top: 0;
   width: var(--day-col-w);
   border-radius: 10px;
-  box-shadow: 0 6px 14px rgba(0,0,0,.08);
+  box-shadow: none;
   border: 1px solid rgba(0,0,0,.06);
   background: rgba(255, 212, 3, var(--slot-alpha));
 }
