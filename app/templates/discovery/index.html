@@ -653,13 +653,15 @@
                 <th>Song</th>
                 <th>Artist</th>
                 <th>Genre</th>
-                <th>BPM</th>
+                <th class="bpm-sort">
+                  BPM <span class="bpm-arrow">↕</span>
+                </th>
                 <th>Match</th>
               </tr>
             </thead>
             <tbody>
               {% for r in results %}
-              <tr>
+              <tr data-bpm="{{ r.get('bpm', 0) }}">
                 <td style="text-align:center; width:36px;">
                   <input
                     type="checkbox"

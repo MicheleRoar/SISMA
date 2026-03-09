@@ -1872,6 +1872,9 @@ function hideLoader() {
   form.addEventListener("submit", () => {
     sessionStorage.removeItem("sisma_selected_tracks");
     showLoader();
+
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
   });
 
   window.addEventListener("load", () => {
@@ -1883,8 +1886,50 @@ function hideLoader() {
   });
 })();
 
-form.addEventListener("submit", () => {
-  showLoader();
-  const btn = form.querySelector('button[type="submit"]');
-  if (btn) btn.disabled = true;
-});
+
+// --- Table sort by BPM ---
+(function () {
+  const table = document.querySelector(".song-table");
+  if (!table) return;
+
+  const header = table.querySelector("th.bpm-sort");
+  const tbody = table.querySelector("tbody");
+  if (!header || !tbody) return;
+
+  const originalRows = Array.from(tbody.querySelectorAll("tr"));
+  let mode = "none"; // none -> asc -> desc -> random -> none
+
+  function updateHeaderLabel() {
+    if (mode === "asc") header.textContent = "BPM ↑";
+    else if (mode === "desc") header.textContent = "BPM ↓";
+    else if (mode === "random") header.textContent = "BPM ⤮";
+    else header.textContent = "BPM ↕";
+  }
+
+  header.style.cursor = "pointer";
+  header.style.userSelect = "none";
+
+  header.addEventListener("click", () => {
+    let rows = Array.from(tbody.querySelectorAll("tr"));
+
+    if (mode === "none") mode = "asc";
+    else if (mode === "asc") mode = "desc";
+    else if (mode === "desc") mode = "random";
+    else mode = "none";
+
+    if (mode === "asc") {
+      rows.sort((a, b) => Number(a.dataset.bpm || 0) - Number(b.dataset.bpm || 0));
+    } else if (mode === "desc") {
+      rows.sort((a, b) => Number(b.dataset.bpm || 0) - Number(a.dataset.bpm || 0));
+    } else if (mode === "random") {
+      rows.sort(() => Math.random() - 0.5);
+    } else {
+      rows = originalRows.slice();
+    }
+
+    rows.forEach((row) => tbody.appendChild(row));
+    updateHeaderLabel();
+  });
+
+  updateHeaderLabel();
+})();

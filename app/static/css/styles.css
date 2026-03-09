@@ -1037,7 +1037,20 @@ details.planner-advanced .grid-2{
 }
 
 
+.song-table th,
+.song-table td {
+  white-space: nowrap;
+}
 
+th.bpm-sort {
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+th.bpm-sort:hover {
+  opacity: 0.85;
+}
 
 
 
