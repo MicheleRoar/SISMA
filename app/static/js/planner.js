@@ -331,18 +331,24 @@
     const r0 = Math.floor((a - startMin) / STEP_MIN);
     const r1 = Math.ceil((b - startMin) / STEP_MIN) - 1;
 
-    const weekdays = new Set((slot.weekdays || []).map(Number));
+    const weekdays = new Set(normalizeWeekdays(slot.weekdays || [1,2,3,4,5]));
+    const weeks = Math.max(1, Number(slot.weeks) || 1);
 
     for (let c = 0; c < COLS; c++) {
+      const weekIndex = Math.floor(c / 7) + 1; // 1-based
+      if (weekIndex > weeks) continue;
+
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + c);
+
       if (!weekdays.has(d.getDay())) continue;
 
       for (let r = r0; r <= r1; r++) {
         if (r < 0 || r >= rows) continue;
-        out.push([r,c]);
+        out.push([r, c]);
       }
     }
+
     return out;
   }
 
