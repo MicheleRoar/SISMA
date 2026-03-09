@@ -32,9 +32,13 @@
   const summaryStats = document.getElementById("summaryStats");
 
   const slotColorEdit = document.getElementById("slotColorEdit");
-  const slotMaxArtist = document.getElementById("slotMaxArtist");
-  const slotCooldown  = document.getElementById("slotCooldown");
-  const slotK         = document.getElementById("slotK");
+
+  const slotTracks = document.getElementById("slotTracks");
+  const slotEnergy = document.getElementById("slotEnergy");
+  const slotMood   = document.getElementById("slotMood");
+  const slotDance  = document.getElementById("slotDance");
+  const slotBpm    = document.getElementById("slotBpm");
+  const slotGenres = document.getElementById("slotGenres");
 
   const btnExportPlan = document.getElementById("btnExportPlan");
   const btnClearPlan  = document.getElementById("btnClearPlan");
@@ -478,7 +482,7 @@
         if (!id || !slots[id]) return;
         selected.slotId = id;
         selected.dayISO = null;
-        applySelectedSlotToEditor(slots[id]);
+        applySelectedSlotToEditor(slots[id], null);
         if (slotInfo) slotInfo.textContent = `Selezionato: ${slots[id].name} (${slots[id].start}–${slots[id].end})`;
         repaintAll();
       });
@@ -490,11 +494,27 @@
     if (slotPlaylistList) slotPlaylistList.innerHTML = `<div class="hint">—</div>`;
   }
 
-  function applySelectedSlotToEditor(slot) {
-    try { if (slotColorEdit) slotColorEdit.value = slot.color || "#FFD403"; } catch {}
-    if (slotMaxArtist) slotMaxArtist.value = String(slot.max_per_artist ?? DEFAULT_MAX_PER_ARTIST);
-    if (slotCooldown) slotCooldown.value = String(slot.cooldown_days ?? DEFAULT_COOLDOWN_DAYS);
-    if (slotK) slotK.value = String(slot.k ?? DEFAULT_K);
+  function applySelectedSlotToEditor(slot, dayISO = null) {
+    try {
+      if (slotColorEdit) slotColorEdit.value = slot.color || "#FFD403";
+    } catch {}
+
+    const playlist = dayISO ? (slot.playlistsByDay?.[dayISO] || []) : [];
+    const stats = computePlaylistStats(playlist);
+
+    if (slotTracks) slotTracks.textContent = String(stats.tracks ?? "—");
+    if (slotEnergy) slotEnergy.textContent = stats.energy != null ? stats.energy.toFixed(2) : "—";
+    if (slotMood)   slotMood.textContent   = stats.mood != null ? stats.mood.toFixed(2) : "—";
+    if (slotDance)  slotDance.textContent  = stats.danceability != null ? stats.danceability.toFixed(2) : "—";
+    if (slotBpm)    slotBpm.textContent    = stats.bpm != null ? String(Math.round(stats.bpm)) : "—";
+
+    if (slotGenres) {
+      if (stats.topGenres.length) {
+        slotGenres.innerHTML = stats.topGenres.map(g => `<li>${escapeHtml(g)}</li>`).join("");
+      } else {
+        slotGenres.innerHTML = `<li class="hint">—</li>`;
+      }
+    }
   }
 
   function escapeHtml(s) {
@@ -505,6 +525,60 @@
       .replaceAll('"',"&quot;")
       .replaceAll("'","&#039;");
   }
+
+  function computePlaylistStats(playlist) {
+    const items = Array.isArray(playlist) ? playlist : [];
+    if (!items.length) {
+      return {
+        tracks: 0,
+        energy: null,
+        mood: null,
+        danceability: null,
+        bpm: null,
+        topGenres: []
+      };
+    }
+
+    const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+
+    const bpms = items
+      .map(x => Number(x.bpm))
+      .filter(Number.isFinite);
+
+    const energies = items
+      .map(x => Number(x.energy))
+      .filter(Number.isFinite);
+
+    const moods = items
+      .map(x => Number(x.valence ?? x.mood))
+      .filter(Number.isFinite);
+
+    const dances = items
+      .map(x => Number(x.danceability))
+      .filter(Number.isFinite);
+
+    const genreCount = {};
+    items.forEach(x => {
+      const g = safeText(x.genre ?? x.track_genre, "");
+      if (!g) return;
+      genreCount[g] = (genreCount[g] || 0) + 1;
+    });
+
+    const topGenres = Object.entries(genreCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([g]) => g);
+
+    return {
+      tracks: items.length,
+      energy: avg(energies),
+      mood: avg(moods),
+      danceability: avg(dances),
+      bpm: avg(bpms),
+      topGenres
+    };
+  }
+
 
   // ---------------- Click handling ----------------
 
@@ -530,11 +604,10 @@
     selected = { slotId, dayISO };
     repaintAll();
 
-    applySelectedSlotToEditor(slot);
-
     if (slotInfo) slotInfo.textContent = `${slot.name} • ${dayISO} • ${slot.start}–${slot.end}`;
 
     const playlist = slot.playlistsByDay?.[dayISO] || [];
+    applySelectedSlotToEditor(slot, dayISO);
 
     if (!playlist.length) {
       if (slotPlaylistList) slotPlaylistList.innerHTML = `<div class="hint">Nessun brano assegnato per questo giorno.</div>`;
@@ -561,20 +634,6 @@
 
     if (slotColorEdit) s.color = slotColorEdit.value || s.color;
 
-    if (slotMaxArtist) {
-      const v = parseInt(slotMaxArtist.value, 10);
-      if (Number.isFinite(v) && v >= 1) s.max_per_artist = v;
-    }
-    if (slotCooldown) {
-      const v = parseInt(slotCooldown.value, 10);
-      if (Number.isFinite(v) && v >= 0) s.cooldown_days = v;
-    }
-    if (slotK) {
-      const v = parseInt(slotK.value, 10);
-      if (Number.isFinite(v) && v >= 10) s.k = v;
-    }
-
-    // If parameters changed, we keep existing playlists but you can decide to invalidate later.
     slots[slotId] = s;
     save();
 
@@ -737,10 +796,9 @@
   bindScrollSync();
 
   // events
+
   if (slotColorEdit) slotColorEdit.addEventListener("input", onSlotEditorChange);
-  if (slotMaxArtist) slotMaxArtist.addEventListener("change", onSlotEditorChange);
-  if (slotCooldown) slotCooldown.addEventListener("change", onSlotEditorChange);
-  if (slotK) slotK.addEventListener("change", onSlotEditorChange);
+
 
   if (btnExportPlan) btnExportPlan.addEventListener("click", exportTimetableJSON);
   if (btnDownloadTimetable) btnDownloadTimetable.addEventListener("click", exportTimetableJSON);

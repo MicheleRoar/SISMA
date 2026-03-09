@@ -157,28 +157,36 @@ def _compute_day_isos(window_start: date, weeks: int, weekdays: List[int], cols:
 
 def _df_to_tracks_payload(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
-    Frontend-friendly payload.
+    Frontend-friendly payload for planner slots.
+    Includes summary-friendly audio features.
     """
     if df is None or df.empty:
         return []
 
     out: List[Dict[str, Any]] = []
     for _, r in df.iterrows():
-        bpm_val = r.get("bpm", None)
+        bpm_val = r.get("bpm", r.get("tempo", None))
         match_val = r.get("match", None)
         popularity_val = r.get("popularity", None)
 
-        out.append(
-            {
-                "track_id": str(r.get("track_id", "") or "").strip(),
-                "title": str(r.get("track_name", "") or "").strip(),
-                "artist": str(r.get("artists", "") or "").strip(),
-                "genre": str(r.get("track_genre", "") or "").strip(),
-                "bpm": None if pd.isna(bpm_val) else int(float(bpm_val)),
-                "match": None if pd.isna(match_val) else float(match_val),
-                "popularity": None if pd.isna(popularity_val) else float(popularity_val),
-            }
-        )
+        energy_val = r.get("energy", None)
+        valence_val = r.get("valence", None)
+        danceability_val = r.get("danceability", None)
+
+        out.append({
+            "track_id": str(r.get("track_id", "") or "").strip(),
+            "title": str(r.get("track_name", "") or "").strip(),
+            "artist": str(r.get("artists", "") or "").strip(),
+            "genre": str(r.get("track_genre", "") or "").strip(),
+
+            "bpm": None if pd.isna(bpm_val) else float(bpm_val),
+            "match": None if pd.isna(match_val) else float(match_val),
+            "popularity": None if pd.isna(popularity_val) else float(popularity_val),
+
+            "energy": None if pd.isna(energy_val) else float(energy_val),
+            "valence": None if pd.isna(valence_val) else float(valence_val),
+            "danceability": None if pd.isna(danceability_val) else float(danceability_val),
+        })
     return out
 
 

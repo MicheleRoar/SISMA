@@ -363,3 +363,42 @@ details.mini summary{
 
 /* subtle hover feedback: we do it on cell but affects block via JS class toggle */
 .p-cell:hover{ background: var(--hover); }
+
+
+.slot-stats{
+  margin-top:12px;
+  display:grid;
+  gap:6px;
+}
+
+.stat-row{
+  display:flex;
+  justify-content:space-between;
+  font-weight:800;
+  font-size:13px;
+  border-bottom:1px dashed var(--line-soft);
+  padding-bottom:4px;
+}
+
+.stat-row:last-child{
+  border-bottom:none;
+}
+
+.slot-genres{
+  margin-top:12px;
+}
+
+.slot-genres ul{
+  padding-left:16px;
+  margin:6px 0 0 0;
+}
+
+.slot-genres li{
+  font-weight:800;
+  font-size:13px;
+}
+
+.section-title.small{
+  font-size:11px;
+  margin-top:10px;
+}

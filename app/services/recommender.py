@@ -484,8 +484,28 @@ class PlaylistRecommender:
         if not selected:
             return pd.DataFrame()
 
-        cols = [c for c in ["track_id", "track_name", "artists", "album_name", "track_genre", "popularity", "genres_list", "genres_str"]
-                if c in self.df.columns]
+        cols = [
+            c for c in [
+                "track_id",
+                "track_name",
+                "artists",
+                "album_name",
+                "track_genre",
+                "popularity",
+                "genres_list",
+                "genres_str",
+                "tempo",
+                "danceability",
+                "energy",
+                "valence",
+                "acousticness",
+                "instrumentalness",
+                "speechiness",
+                "liveness",
+            ]
+            if c in self.df.columns
+        ]
+        
         out = self.df.iloc[np.asarray(selected, dtype=np.int64)][cols].copy()
 
         if "artists" in out.columns:
@@ -1181,6 +1201,14 @@ class PlaylistRecommender:
                 "popularity",
                 "genres_list",
                 "genres_str",
+                "tempo",
+                "danceability",
+                "energy",
+                "valence",
+                "acousticness",
+                "instrumentalness",
+                "speechiness",
+                "liveness",
             ]
             # keep only columns that exist in self.df
             cols = [c for c in base_cols if c in self.df.columns]
@@ -1321,6 +1349,14 @@ class PlaylistRecommender:
                 "popularity",
                 "genres_list",
                 "genres_str",
+                "tempo",
+                "danceability",
+                "energy",
+                "valence",
+                "acousticness",
+                "instrumentalness",
+                "speechiness",
+                "liveness",
             ]
             if c in self.df.columns
         ]
