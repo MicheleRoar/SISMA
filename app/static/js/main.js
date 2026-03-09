@@ -1429,45 +1429,64 @@ function toggleGenreUIForRegionMode() {
   const hidden = document.getElementById("planner_weekdays");
   if (!host || !hidden) return;
 
+  const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+  function normalizeSet(values) {
+    const out = new Set();
+    for (const v of values) {
+      const n = parseInt(v, 10);
+      if (Number.isFinite(n) && n >= 0 && n <= 6) out.add(n);
+    }
+    return out;
+  }
+
   function getSelectedSet() {
-    return new Set(
-      String(hidden.value || "")
-        .split(",")
-        .map(x => parseInt(x.trim(), 10))
-        .filter(Number.isFinite)
-    );
+    return normalizeSet(String(hidden.value || "").split(",").map(x => x.trim()));
+  }
+
+  function syncUi(set) {
+    const allSelected = ALL_DAYS.every(d => set.has(d));
+
+    host.querySelectorAll(".wd-btn").forEach(btn => {
+      const v = parseInt(btn.dataset.wd, 10);
+      if (!Number.isFinite(v)) return;
+
+      if (v === 7) {
+        btn.classList.toggle("active", allSelected);
+      } else {
+        btn.classList.toggle("active", set.has(v));
+      }
+    });
   }
 
   function setSelectedSet(set) {
-    // fallback: non permettere set vuoto
-    if (set.size === 0) [1,2,3,4,5].forEach(x => set.add(x));
+    const normalized = normalizeSet(Array.from(set));
 
-    hidden.value = Array.from(set).sort((a,b)=>a-b).join(",");
+    // fallback: mai vuoto
+    if (normalized.size === 0) {
+      [1, 2, 3, 4, 5].forEach(x => normalized.add(x));
+    }
 
-    // refresh UI
-    host.querySelectorAll(".wd-btn").forEach(btn => {
-      const v = parseInt(btn.dataset.wd, 10);
-      btn.classList.toggle("active", set.has(v));
-    });
+    hidden.value = Array.from(normalized).sort((a, b) => a - b).join(",");
+    syncUi(normalized);
 
-    // trigger per download link ecc.
     const form = document.getElementById("playlist_form");
     if (form) form.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  // init: se hidden vuoto, usa stato dal template (active) oppure Mon-Fri
+  // init: hidden -> DOM active -> fallback Mon-Fri
   let selected = getSelectedSet();
   if (selected.size === 0) {
-    const fromDom = new Set(
+    selected = normalizeSet(
       Array.from(host.querySelectorAll(".wd-btn.active"))
-        .map(b => parseInt(b.dataset.wd, 10))
-        .filter(Number.isFinite)
+        .map(b => b.dataset.wd)
     );
-    selected = fromDom.size ? fromDom : new Set([1,2,3,4,5]);
+  }
+  if (selected.size === 0) {
+    selected = new Set([1, 2, 3, 4, 5]);
   }
   setSelectedSet(selected);
 
-  // click delegation
   host.addEventListener("click", (e) => {
     const btn = e.target.closest(".wd-btn");
     if (!btn) return;
@@ -1477,8 +1496,18 @@ function toggleGenreUIForRegionMode() {
     if (!Number.isFinite(wd)) return;
 
     const next = getSelectedSet();
-    if (next.has(wd)) next.delete(wd);
-    else next.add(wd);
+
+    if (wd === 7) {
+      const allSelected = ALL_DAYS.every(d => next.has(d));
+      if (allSelected) {
+        next.clear();
+      } else {
+        ALL_DAYS.forEach(d => next.add(d));
+      }
+    } else {
+      if (next.has(wd)) next.delete(wd);
+      else next.add(wd);
+    }
 
     setSelectedSet(next);
   });
