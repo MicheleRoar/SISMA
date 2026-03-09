@@ -1869,19 +1869,16 @@ function hideLoader() {
   const form = document.getElementById("playlist_form");
   if (!form) return;
 
-  // 1) Mostra loader quando l'utente genera la playlist
   form.addEventListener("submit", () => {
+    sessionStorage.removeItem("sisma_selected_tracks");
     showLoader();
   });
 
-  // 2) Quando la pagina (nuova) è pronta, nascondi loader.
-  // Funziona sia se ci sono risultati, sia se c'è solo la hint.
   window.addEventListener("load", () => {
     hideLoader();
   });
 
-  // 3) Safari/Firefox bfcache: tornando indietro può "riesumare" il loader visibile
-  window.addEventListener("pageshow", (e) => {
+  window.addEventListener("pageshow", () => {
     hideLoader();
   });
 })();

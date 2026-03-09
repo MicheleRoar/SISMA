@@ -35,7 +35,11 @@
     if (!raw) return;
 
     let selected = [];
-    try { selected = JSON.parse(raw) || []; } catch (e) { selected = []; }
+    try {
+      selected = JSON.parse(raw) || [];
+    } catch (e) {
+      selected = [];
+    }
 
     if (!Array.isArray(selected) || selected.length === 0) return;
 
@@ -47,7 +51,6 @@
       el.checked = selectedSet.has(tid);
     });
   }
-
 
   function base64urlEncode(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
