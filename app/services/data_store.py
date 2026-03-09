@@ -294,6 +294,13 @@ class DataStore:
             sep="|",
         )
 
+
+        # --- DROP tracks with no resolved genres ---
+        if "genres_list" in tracks.columns:
+            tracks = tracks[
+                tracks["genres_list"].apply(lambda gs: isinstance(gs, list) and len(gs) > 0)
+            ].copy()
+
         # --- NEW: create a bounded version for token-safe match ---
         # Keep original 'genres_str' for compatibility/debug, add 'genres_str_bounded' (non breaking)
         if "genres_str" in tracks.columns:
