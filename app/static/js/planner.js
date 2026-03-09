@@ -11,8 +11,7 @@
   const START_DAY = "10:00";
   const END_DAY   = "24:00";
   const STEP_MIN  = 30;
-  const COLS      = 14;
-  const LS_KEY    = "sisma_planner_v4";
+  const COLS = 14;
   const LS_PLAN_KEY = "sisma_planner_plan_v1";
 
   const DEFAULT_K = 50;
@@ -152,29 +151,34 @@
     }
   }
 
-  // ---------------- Persistence ----------------
   function save() {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        startDateISO: startDate ? startDate.toISOString() : null,
-        slots
-      }));
+      const payload = {
+        version: 1,
+        startDateISO: startDate ? fmtLocalISODate(startDate) : null,
+        slots,
+        report: {}
+      };
+      localStorage.setItem(LS_PLAN_KEY, JSON.stringify(payload));
     } catch {}
   }
 
   function load() {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const raw = localStorage.getItem(LS_PLAN_KEY);
       if (!raw) return false;
+
       const obj = JSON.parse(raw);
       if (!obj || typeof obj !== "object") return false;
 
-      startDate = obj.startDateISO ? new Date(obj.startDateISO) : null;
+      const sd = obj.startDateISO ? new Date(`${obj.startDateISO}T00:00:00`) : null;
+      startDate = sd ? getStartOfWeekMonday(sd) : null;
       slots = obj.slots || {};
 
       Object.keys(slots).forEach(id => {
         const s = slots[id];
         if (!s) return;
+        s.id = s.id || id;
         if (!s.playlistsByDay) s.playlistsByDay = {};
         if (!s.weekdays) s.weekdays = [1,2,3,4,5];
         if (!s.discovery) s.discovery = {};
@@ -192,49 +196,13 @@
   function clearAll() {
     slots = {};
     selected = { slotId: null, dayISO: null };
-    save();
+    localStorage.removeItem(LS_PLAN_KEY);
     rebuildEverything();
     renderSidebarEmpty("Planner resettato.");
     setDebug("—");
   }
 
 
-  function loadPlanFromLocalStorage() {
-    try {
-      const raw = localStorage.getItem(LS_PLAN_KEY);
-      if (!raw) return null;
-      const plan = JSON.parse(raw);
-      if (!plan || typeof plan !== "object") return null;
-      return plan;
-    } catch {
-      return null;
-    }
-  }
-
-  function applyPlan(plan) {
-    // plan atteso: { startDateISO, slots } oppure { startDateISO, slotsById } ecc.
-    // Io mi baso su quello che ti ho fatto generare: startDateISO + slots dict.
-    const sd = plan.startDateISO ? new Date(`${plan.startDateISO}T00:00:00`) : null;
-    startDate = sd ? getStartOfWeekMonday(sd) : getStartOfWeekMonday(todayStart());
-
-    slots = plan.slots || plan.slotsById || {};
-    if (!slots || typeof slots !== "object") slots = {};
-
-    // normalize
-    Object.keys(slots).forEach(id => {
-      const s = slots[id];
-      if (!s) return;
-      s.id = s.id || id;
-      if (!s.playlistsByDay) s.playlistsByDay = {};        // <-- QUI deve già essere pieno
-      if (!s.weekdays) s.weekdays = [1,2,3,4,5];
-      if (!s.discovery) s.discovery = {};
-      if (s.k == null) s.k = DEFAULT_K;
-      if (s.max_per_artist == null) s.max_per_artist = DEFAULT_MAX_PER_ARTIST;
-      if (s.cooldown_days == null) s.cooldown_days = DEFAULT_COOLDOWN_DAYS;
-    });
-
-    selected = { slotId: null, dayISO: null };
-  }
 
 
   // ---------------- Draft (Discovery -> Planner) ----------------
@@ -335,7 +303,7 @@
     const weeks = Math.max(1, Number(slot.weeks) || 1);
 
     for (let c = 0; c < COLS; c++) {
-      const weekIndex = Math.floor(c / 7) + 1; // 1-based
+      const weekIndex = Math.floor(c / 7) + 1;
       if (weekIndex > weeks) continue;
 
       const d = new Date(startDate);
@@ -627,14 +595,21 @@
 
   // ---------------- Export / Publish ----------------
   function occurrencesInViewForSlot(slot) {
-    const weekdays = new Set((slot.weekdays || []).map(Number));
+    const weekdays = new Set(normalizeWeekdays(slot.weekdays || [1,2,3,4,5]));
+    const weeks = Math.max(1, Number(slot.weeks) || 1);
     const out = [];
+
     for (let c = 0; c < COLS; c++) {
+      const weekIndex = Math.floor(c / 7) + 1;
+      if (weekIndex > weeks) continue;
+
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + c);
+
       if (!weekdays.has(d.getDay())) continue;
       out.push(computeDayISO(c));
     }
+
     return out;
   }
 
@@ -755,13 +730,6 @@
   ensureGridSize();
 
   load();
-
-  const incomingPlan = loadPlanFromLocalStorage();
-  if (incomingPlan) {
-    applyPlan(incomingPlan);
-    save();
-    //try { localStorage.removeItem(LS_PLAN_KEY); } catch {}
-  }
 
   if (!startDate) startDate = getStartOfWeekMonday(todayStart());
 

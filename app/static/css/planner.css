@@ -318,7 +318,6 @@ details.mini summary{
 
 /* base cells layer: keep gridlines visible */
 .p-cells{
-  margin-left: -15px;
   display:grid;
   grid-template-columns: repeat(14, var(--day-col-w));
   width: calc(14 * var(--day-col-w));
