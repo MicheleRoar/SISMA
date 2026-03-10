@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import math
 import hashlib
 import json
 from dataclasses import dataclass
@@ -188,6 +189,31 @@ def _df_to_tracks_payload(df: pd.DataFrame) -> List[Dict[str, Any]]:
             "danceability": None if pd.isna(danceability_val) else float(danceability_val),
         })
     return out
+
+
+
+def _compute_k_from_slot_duration(
+    start_hhmm: str,
+    end_hhmm: str,
+    *,
+    avg_track_minutes: float = 3.0,
+    k_min: int = 5,
+    k_max: int = 50,
+) -> int:
+    def _time_to_min(t: str) -> int:
+        hh, mm = t.split(":")
+        return int(hh) * 60 + int(mm)
+
+    start_min = _time_to_min(start_hhmm)
+    end_min = _time_to_min(end_hhmm)
+
+    duration = max(0, end_min - start_min)
+    if duration <= 0:
+        return k_min
+
+    k = math.ceil(duration / float(avg_track_minutes))
+    return max(k_min, min(int(k), k_max))
+
 
 
 # ----------------------------
@@ -826,6 +852,15 @@ class PlannerService:
         slot_start = str(rule.get("start") or "10:00").strip() or "10:00"
         slot_end = str(rule.get("end") or "11:00").strip() or "11:00"
 
+
+        computed_k = _compute_k_from_slot_duration(
+        slot_start,
+        slot_end,
+        avg_track_minutes=3.0,
+        k_min=5,
+        k_max=50,
+        )
+
         weeks = int(rule.get("weeks", 2) or 2)
         weeks = max(1, min(weeks, 8))
 
@@ -846,7 +881,7 @@ class PlannerService:
         gen = self.generate_for_discovery_payload(
             discovery_payload=discovery_payload,
             day_isos=day_isos,
-            k=int(k),
+            k=int(computed_k),
             max_per_artist=int(max_per_artist),
             cooldown_days=int(cooldown_days),
             exclude_track_ids_global=set(),
@@ -877,7 +912,7 @@ class PlannerService:
             "end": slot_end,
             "weeks": weeks,
             "weekdays": weekdays,
-            "k": int(k),
+            "k": int(computed_k),
             "max_per_artist": int(max_per_artist),
             "cooldown_days": int(cooldown_days),
             "discovery": discovery_payload,
