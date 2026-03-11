@@ -403,4 +403,32 @@ details.mini summary{
   margin-top:10px;
 }
 
+.pl-item-checkable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
 
+.pl-item-checkable:hover {
+  background: rgba(0,0,0,0.05);
+}
+
+.track-toggle {
+  flex-shrink: 0;
+  transform: scale(1.1);
+  cursor: pointer;
+}
+
+.pl-item-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pl-item-checkable {
+  cursor: pointer;
+}

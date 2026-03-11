@@ -619,7 +619,23 @@
         const title = safeText(x.title ?? x.track_name ?? x.name, "(untitled)");
         const artist = safeText(x.artist ?? x.artists, "");
         const bpm = (x.bpm != null && x.bpm !== "") ? ` <span class="muted">(${x.bpm})</span>` : "";
-        return `<div class="pl-item">${i+1}. ${escapeHtml(title)}${artist ? " — " + escapeHtml(artist) : ""}${bpm}</div>`;
+        const checked = x.enabled === false ? "" : "checked";
+
+        return `
+          <label class="pl-item pl-item-checkable">
+            <input
+              type="checkbox"
+              class="track-toggle"
+              data-slot-id="${escapeHtml(slotId)}"
+              data-day-iso="${escapeHtml(dayISO)}"
+              data-track-idx="${i}"
+              ${checked}
+            >
+            <span class="pl-item-text">
+              ${i + 1}. ${escapeHtml(title)}${artist ? " — " + escapeHtml(artist) : ""}${bpm}
+            </span>
+          </label>
+        `;
       }).join("");
     }
   }
