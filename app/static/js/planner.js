@@ -116,6 +116,25 @@
     return s.trim() ? s.trim() : fallback;
   }
 
+
+  function ensureTrackEnabledFlags(slot, dayISO) {
+    if (!slot || !dayISO) return [];
+    if (!slot.playlistsByDay) slot.playlistsByDay = {};
+
+    const playlist = slot.playlistsByDay[dayISO] || [];
+    playlist.forEach((t) => {
+      if (typeof t.enabled !== "boolean") t.enabled = true;
+    });
+    slot.playlistsByDay[dayISO] = playlist;
+    return playlist;
+  }
+
+  function getEnabledPlaylist(slot, dayISO) {
+    const playlist = ensureTrackEnabledFlags(slot, dayISO);
+    return playlist.filter(t => t.enabled !== false);
+  }
+    
+
   function uniq(arr) {
     const out = [];
     const seen = new Set();
@@ -499,7 +518,7 @@
       if (slotColorEdit) slotColorEdit.value = slot.color || "#FFD403";
     } catch {}
 
-    const playlist = dayISO ? (slot.playlistsByDay?.[dayISO] || []) : [];
+    const playlist = dayISO ? getEnabledPlaylist(slot, dayISO) : [];
     const stats = computePlaylistStats(playlist);
 
     if (slotTracks) slotTracks.textContent = String(stats.tracks ?? "—");
@@ -606,11 +625,13 @@
 
     if (slotInfo) slotInfo.textContent = `${slot.name} • ${dayISO} • ${slot.start}–${slot.end}`;
 
-    const playlist = slot.playlistsByDay?.[dayISO] || [];
+    const playlist = ensureTrackEnabledFlags(slot, dayISO);
     applySelectedSlotToEditor(slot, dayISO);
 
     if (!playlist.length) {
-      if (slotPlaylistList) slotPlaylistList.innerHTML = `<div class="hint">Nessun brano assegnato per questo giorno.</div>`;
+      if (slotPlaylistList) {
+        slotPlaylistList.innerHTML = `<div class="hint">Nessun brano assegnato per questo giorno.</div>`;
+      }
       return;
     }
 
@@ -618,17 +639,18 @@
       slotPlaylistList.innerHTML = playlist.map((x, i) => {
         const title = safeText(x.title ?? x.track_name ?? x.name, "(untitled)");
         const artist = safeText(x.artist ?? x.artists, "");
-        const bpm = (x.bpm != null && x.bpm !== "") ? ` <span class="muted">(${x.bpm})</span>` : "";
-        const checked = x.enabled === false ? "" : "checked";
+        const bpm = (x.bpm != null && x.bpm !== "")
+          ? `<span class="muted"> • ${escapeHtml(String(Math.round(Number(x.bpm))))} BPM</span>`
+          : "";
+
+        const checked = x.enabled !== false ? "checked" : "";
 
         return `
           <label class="pl-item pl-item-checkable">
             <input
               type="checkbox"
               class="track-toggle"
-              data-slot-id="${escapeHtml(slotId)}"
-              data-day-iso="${escapeHtml(dayISO)}"
-              data-track-idx="${i}"
+              data-track-index="${i}"
               ${checked}
             >
             <span class="pl-item-text">
@@ -637,8 +659,20 @@
           </label>
         `;
       }).join("");
+
+      slotPlaylistList.querySelectorAll(".track-toggle").forEach((el) => {
+        el.addEventListener("change", () => {
+          const idx = Number(el.dataset.trackIndex);
+          if (!Number.isInteger(idx) || !playlist[idx]) return;
+
+          playlist[idx].enabled = !!el.checked;
+          slot.playlistsByDay[dayISO] = playlist;
+          save();
+          applySelectedSlotToEditor(slot, dayISO);
+        });
+      });
     }
-  }
+      }
 
 
   // ---------------- Slot editor events ----------------
@@ -722,7 +756,7 @@
           end: slot.end,
           name: slot.name,
           color: slot.color,
-          tracks: slot.playlistsByDay?.[dayISO] || [],
+          tracks: getEnabledPlaylist(slot, dayISO),
           discovery: slot.discovery || {},
           spotify_playlist_url: null,
         });
@@ -769,7 +803,7 @@
           end: slot.end,
           name: slot.name,
           color: slot.color,
-          tracks: slot.playlistsByDay?.[dayISO] || [],
+          tracks: getEnabledPlaylist(slot, dayISO),
         });
       }
     }

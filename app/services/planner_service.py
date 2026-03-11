@@ -190,6 +190,58 @@ def _df_to_tracks_payload(df: pd.DataFrame) -> List[Dict[str, Any]]:
         })
     return out
 
+def _extract_genres_from_row(row: pd.Series) -> List[str]:
+    out: List[str] = []
+
+    gl = row.get("genres_list", None)
+    if isinstance(gl, list):
+        out.extend([str(x).strip() for x in gl if str(x).strip()])
+
+    if not out:
+        gs = str(row.get("genres_str", "") or "").strip()
+        if gs:
+            out.extend([p.strip() for p in gs.split("|") if p.strip()])
+
+    if not out:
+        tg = str(row.get("track_genre", "") or "").strip()
+        if tg:
+            out.extend([p.strip() for p in tg.split(",") if p.strip()])
+
+    seen = set()
+    cleaned = []
+    for g in out:
+        g2 = g.strip()
+        if g2 and g2.lower() not in seen:
+            seen.add(g2.lower())
+            cleaned.append(g2)
+    return cleaned
+
+
+def _bridge_genres_from_results(
+    playlist_df: pd.DataFrame,
+    *,
+    exclude_genres: List[str],
+    already_included_genres: List[str],
+    top_n: int = 25,
+) -> List[str]:
+    if playlist_df is None or playlist_df.empty:
+        return []
+
+    ex = {g.strip().lower() for g in (exclude_genres or []) if g and g.strip()}
+    already = {g.strip().lower() for g in (already_included_genres or []) if g and g.strip()}
+
+    cnt: Dict[str, int] = {}
+    for _, row in playlist_df.iterrows():
+        for g in _extract_genres_from_row(row):
+            gl = g.lower()
+            if gl in ex or gl in already:
+                continue
+            cnt[g] = cnt.get(g, 0) + 1
+
+    if not cnt:
+        return []
+
+    return [g for g, _ in sorted(cnt.items(), key=lambda kv: kv[1], reverse=True)[:top_n]]
 
 
 def _compute_k_from_slot_duration(
@@ -227,6 +279,8 @@ class PlannerRequest:
     """
     user_input: Dict[str, float]
     ranges: Dict[str, Tuple[Optional[float], Optional[float]]]
+
+    selected_regions: List[str]
 
     include_artists: List[str]
     include_genres: List[str]
@@ -365,6 +419,13 @@ class PlannerService:
         include_genres = _as_list_str(
             p.get("include_genres") or p.get("genres_include") or p.get("genres") or []
         )
+
+        selected_regions = [
+            str(x).strip().upper()
+            for x in _as_list_str(p.get("region_isos") or p.get("selected_regions") or [])
+            if str(x).strip()
+        ]
+
         include_keywords = _as_list_str(
             p.get("include_keywords") or p.get("keywords_include") or p.get("keywords") or []
         )
@@ -424,6 +485,7 @@ class PlannerService:
         return PlannerRequest(
             user_input=user_input,
             ranges=ranges,
+            selected_regions=selected_regions,
             include_artists=include_artists,
             include_genres=include_genres,
             include_keywords=include_keywords,
@@ -441,7 +503,6 @@ class PlannerService:
         )
 
     # ---------- pool building ----------
-
     def _build_master_pool(
         self,
         req: PlannerRequest,
@@ -452,8 +513,15 @@ class PlannerService:
     ) -> pd.DataFrame:
         """
         Build one global candidate pool for the whole slot.
+
+        Logic:
+          - strict pool first
+          - if no regions are selected: bootstrap bridge genres from a small strict seed
+          - build a wider fallback pool
+          - merge strict-ranked pool first, then fallback-ranked pool
         """
-        universe_idx = self.rec.build_universe_indices(
+        strict_universe_idx = self.rec.build_universe_indices(
+            selected_regions=req.selected_regions,
             include_artists=req.include_artists,
             include_genres=req.include_genres,
             exclude_artists=req.exclude_artists,
@@ -463,9 +531,9 @@ class PlannerService:
         target_pool_size = max(int(total_needed) * 4, req.pool_size, 2000)
         target_pool_size = min(target_pool_size, 50000)
 
-        pool = self.rec.build_pool(
+        strict_pool = self.rec.build_pool(
             user_input=req.user_input,
-            universe_idx=universe_idx,
+            universe_idx=strict_universe_idx,
             pool_size=target_pool_size,
             allow_explicit=req.allow_explicit,
             exclude_track_ids=exclude_track_ids,
@@ -477,22 +545,20 @@ class PlannerService:
             lock_tempo=req.lock_tempo,
             popularity_tier=req.popularity_tier,
             popularity_genres=req.include_genres,
+            selected_regions=req.selected_regions,
+            manual_genres=req.include_genres,
         )
 
-        if pool is None or pool.empty:
+        if strict_pool is None or strict_pool.empty or "_row_idx" not in strict_pool.columns:
             return pd.DataFrame()
 
-        # second-pass filtering to fully honor include/exclude/keywords inside the built pool
-        if "_row_idx" not in pool.columns:
-            return pd.DataFrame()
+        strict_pool_idx = strict_pool["_row_idx"].to_numpy()
 
-        pool_idx = pool["_row_idx"].to_numpy()
-
-        pool2 = self.rec.recommend_from_pool(
+        strict_ranked = self.rec.recommend_from_pool(
             user_input=req.user_input,
-            pool_idx=pool_idx,
-            k=min(len(pool_idx), target_pool_size),
-            max_per_artist=999999,  # don't constrain here; constrain during day assignment
+            pool_idx=strict_pool_idx,
+            k=min(len(strict_pool_idx), target_pool_size),
+            max_per_artist=999999,
             exclude_track_ids=set(exclude_track_ids),
             allow_explicit=req.allow_explicit,
             shuffle_within_top=False,
@@ -507,6 +573,94 @@ class PlannerService:
             include_keywords=req.include_keywords,
             exclude_keywords=req.exclude_keywords,
         )
+
+        if strict_ranked is None:
+            strict_ranked = pd.DataFrame()
+
+        bridge_genres_seed: List[str] = []
+
+        if (not req.selected_regions) and (strict_ranked is not None) and (not strict_ranked.empty):
+            seed_k = min(30, max(10, total_needed // 10))
+            seed_k = min(seed_k, len(strict_ranked))
+            seed_df = strict_ranked.head(seed_k).copy()
+
+            bridge_genres_seed = _bridge_genres_from_results(
+                seed_df,
+                exclude_genres=req.exclude_genres,
+                already_included_genres=req.include_genres,
+                top_n=25,
+            )
+
+        if req.selected_regions:
+            wide_artists = []
+            wide_genres = []
+        else:
+            wide_artists = req.include_artists
+            wide_genres = []
+            seen_wide = set()
+
+            for g in (req.include_genres + bridge_genres_seed):
+                gs = str(g).strip()
+                gl = gs.lower()
+                if gs and gl not in seen_wide:
+                    seen_wide.add(gl)
+                    wide_genres.append(gs)
+
+        wide_universe_idx = self.rec.build_universe_indices(
+            selected_regions=req.selected_regions,
+            include_artists=wide_artists,
+            include_genres=wide_genres,
+            exclude_artists=req.exclude_artists,
+            exclude_genres=req.exclude_genres,
+        )
+
+        wide_pool = self.rec.build_pool(
+            user_input=req.user_input,
+            universe_idx=wide_universe_idx,
+            pool_size=target_pool_size,
+            allow_explicit=req.allow_explicit,
+            exclude_track_ids=exclude_track_ids,
+            shuffle_within_top=True,
+            random_state=int(random_state) + 1,
+            dontcare=req.dontcare,
+            weight_overrides=req.weight_overrides,
+            ranges=req.ranges,
+            lock_tempo=req.lock_tempo,
+            popularity_tier="",
+            popularity_genres=[],
+            selected_regions=req.selected_regions,
+            manual_genres=req.include_genres,
+        )
+
+        if wide_pool is None or wide_pool.empty or "_row_idx" not in wide_pool.columns:
+            pool2 = strict_ranked.copy()
+        else:
+            wide_pool_idx = wide_pool["_row_idx"].to_numpy()
+
+            wide_ranked = self.rec.recommend_from_pool(
+                user_input=req.user_input,
+                pool_idx=wide_pool_idx,
+                k=min(len(wide_pool_idx), target_pool_size),
+                max_per_artist=999999,
+                exclude_track_ids=set(exclude_track_ids),
+                allow_explicit=req.allow_explicit,
+                shuffle_within_top=False,
+                random_state=int(random_state) + 1,
+                weight_overrides=req.weight_overrides,
+                dontcare=req.dontcare,
+                include_artists=req.include_artists,
+                include_genres=req.include_genres,
+                include_mode="prefer",
+                exclude_artists=req.exclude_artists,
+                exclude_genres=req.exclude_genres,
+                include_keywords=req.include_keywords,
+                exclude_keywords=req.exclude_keywords,
+            )
+
+            if wide_ranked is None:
+                wide_ranked = pd.DataFrame()
+
+            pool2 = pd.concat([strict_ranked, wide_ranked], ignore_index=True)
 
         if pool2 is None or pool2.empty:
             return pd.DataFrame()
@@ -602,6 +756,27 @@ class PlannerService:
 
         return quotas
 
+
+    def _snake_day_order(self, day_isos: List[str]) -> List[str]:
+        day_isos = [str(d).strip() for d in (day_isos or []) if str(d).strip()]
+        if len(day_isos) <= 2:
+            return day_isos
+
+        out: List[str] = []
+        left = 0
+        right = len(day_isos) - 1
+
+        while left <= right:
+            out.append(day_isos[left])
+            left += 1
+            if left <= right:
+                out.append(day_isos[right])
+                right -= 1
+
+        return out
+
+
+
     def _distribute_pool_across_days(
         self,
         pool_df: pd.DataFrame,
@@ -613,6 +788,7 @@ class PlannerService:
         """
         Distribute one master pool across all slot days.
         No track reuse inside the slot plan.
+        Popularity buckets are spread across days in snake / seeded order.
         """
         day_isos = [str(d).strip() for d in (day_isos or []) if str(d).strip()]
         day_isos = sorted(dict.fromkeys(day_isos))
@@ -624,61 +800,78 @@ class PlannerService:
         bucket_order = self._bucket_quota_for_k(k)
 
         used_track_ids: Set[str] = set()
-        playlists_by_day: Dict[str, List[Dict[str, Any]]] = {}
+        playlists_by_day: Dict[str, List[pd.Series]] = {d: [] for d in day_isos}
+        artist_counts_by_day: Dict[str, Dict[str, int]] = {d: {} for d in day_isos}
 
-        for day_iso in day_isos:
-            day_rows: List[pd.Series] = []
-            artist_counts: Dict[str, int] = {}
+        snake_days = self._snake_day_order(day_isos)
 
-            def can_take(row: pd.Series) -> bool:
-                tid = str(row.get("track_id", "") or "").strip()
-                artist = str(row.get("artists", "") or "").strip().lower()
+        def can_take(day_iso: str, row: pd.Series) -> bool:
+            tid = str(row.get("track_id", "") or "").strip()
+            artist = str(row.get("artists", "") or "").strip().lower()
 
-                if not tid or tid in used_track_ids:
-                    return False
-                if artist_counts.get(artist, 0) >= int(max_per_artist):
-                    return False
-                return True
+            if not tid or tid in used_track_ids:
+                return False
+            if len(playlists_by_day[day_iso]) >= int(k):
+                return False
+            if artist_counts_by_day[day_iso].get(artist, 0) >= int(max_per_artist):
+                return False
+            return True
 
-            def take_row(row: pd.Series) -> None:
-                tid = str(row.get("track_id", "") or "").strip()
-                artist = str(row.get("artists", "") or "").strip().lower()
+        def take_row(day_iso: str, row: pd.Series) -> None:
+            tid = str(row.get("track_id", "") or "").strip()
+            artist = str(row.get("artists", "") or "").strip().lower()
 
-                day_rows.append(row)
-                used_track_ids.add(tid)
-                artist_counts[artist] = artist_counts.get(artist, 0) + 1
+            playlists_by_day[day_iso].append(row)
+            used_track_ids.add(tid)
+            artist_counts_by_day[day_iso][artist] = artist_counts_by_day[day_iso].get(artist, 0) + 1
 
-            # pass 1: follow bucket quotas
-            for bucket_name, quota in bucket_order:
-                if quota <= 0:
-                    continue
+        # pass 1: seeded bucket distribution across days
+        for bucket_name, quota in bucket_order:
+            if quota <= 0:
+                continue
 
-                taken = 0
-                bucket_df = buckets.get(bucket_name, pd.DataFrame())
-                if bucket_df is None or bucket_df.empty:
-                    continue
+            bucket_df = buckets.get(bucket_name, pd.DataFrame())
+            if bucket_df is None or bucket_df.empty:
+                continue
 
-                for _, row in bucket_df.iterrows():
-                    if not can_take(row):
-                        continue
-                    take_row(row)
-                    taken += 1
-                    if taken >= quota:
+            bucket_rows = list(bucket_df.iterrows())
+            cursor = 0
+
+            for round_idx in range(quota):
+                day_cycle = snake_days if (round_idx % 2 == 0) else list(reversed(snake_days))
+
+                for day_iso in day_cycle:
+                    while cursor < len(bucket_rows):
+                        _, row = bucket_rows[cursor]
+                        cursor += 1
+
+                        if not can_take(day_iso, row):
+                            continue
+
+                        take_row(day_iso, row)
                         break
 
-            # pass 2: fill remaining from whole pool
-            if len(day_rows) < int(k):
+        # pass 2: fill remaining gaps from whole pool, also in snake order
+        changed = True
+        while changed:
+            changed = False
+            for day_iso in snake_days:
+                if len(playlists_by_day[day_iso]) >= int(k):
+                    continue
+
                 for _, row in pool_df.iterrows():
-                    if not can_take(row):
+                    if not can_take(day_iso, row):
                         continue
-                    take_row(row)
-                    if len(day_rows) >= int(k):
-                        break
+                    take_row(day_iso, row)
+                    changed = True
+                    break
 
-            day_df = pd.DataFrame(day_rows).head(int(k)).copy()
-            playlists_by_day[day_iso] = _df_to_tracks_payload(day_df)
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for day_iso in day_isos:
+            day_df = pd.DataFrame(playlists_by_day[day_iso]).head(int(k)).copy()
+            out[day_iso] = _df_to_tracks_payload(day_df)
 
-        return playlists_by_day
+        return out
 
     # ---------- public generation ----------
 
@@ -741,7 +934,7 @@ class PlannerService:
             "master_pool_size": int(len(master_pool)) if master_pool is not None else 0,
             "include_artists": req.include_artists,
             "include_genres": req.include_genres,
-            "include_keywords": req.include_keywords,
+            "selected_regions": req.selected_regions,
             "exclude_artists": req.exclude_artists,
             "exclude_genres": req.exclude_genres,
             "exclude_keywords": req.exclude_keywords,

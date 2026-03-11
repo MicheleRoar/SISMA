@@ -220,4 +220,6 @@ def get_region_payload(*, iso: str | None = None, key: str | None = None, top_n:
         "label": KEY_TO_LABEL.get(key, key),
         "n_seed_authors": int(data.get("n_seed_authors", 0) or 0),
         "genres": genres,
-    }
+        "expanded_genres_ranked": expanded_sorted,
+        "expanded_genres_map": expanded,
+}

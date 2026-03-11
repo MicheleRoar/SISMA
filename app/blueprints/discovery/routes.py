@@ -657,18 +657,19 @@ def generate():
         user_input = _apply_similarity_blend(user_input)
 
         universe_idx = recommender.build_universe_indices(
-        include_artists=artists,
-        include_genres=include_genres_final,
-        exclude_artists=exclude_artists,
-        exclude_genres=exclude_genres,
+            selected_regions=region_isos,
+            include_artists=artists,
+            include_genres=include_genres_final,
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
         )
 
 
         # 1) Build a BIG pool around the similarity user_input, constrained by ranges.
-        #    lock_tempo=True iff user set tempo_min/max (hard BPM when requested)
+        #    lock_tempo=True if user set tempo_min/max (hard BPM when requested)
         pool_df = recommender.build_pool(
             user_input=user_input,
-            universe_idx=universe_idx,   # <--- FIX
+            universe_idx=universe_idx,
             ranges=ranges,
             lock_tempo=lock_tempo,
             allow_explicit=allow_explicit,
@@ -677,7 +678,9 @@ def generate():
             random_state=42,
             dontcare=dontcare,
             popularity_tier=tier,
-            popularity_genres=genres_list,  # manual only, non include_genres_final
+            popularity_genres=genres_list,
+            selected_regions=region_isos,
+            manual_genres=genres_list,
         )
 
         if "_row_idx" not in pool_df.columns:
@@ -689,12 +692,67 @@ def generate():
         TARGET = 50
 
         # ----------------------------
-        # WIDE POOL (for PASS C semantic bridge)
-        # same audio/ranges, but NO include_genres hard restriction
+        # Bootstrap semantic expansion for WIDE (only when no regions are selected)
+        # Reuse genres that actually emerge from a small strict seed.
         # ----------------------------
+        bridge_genres_seed: List[str] = []
+
+        if not region_isos and len(pool_df) > 0:
+            seed_k = min(30, max(10, TARGET // 2))
+
+            seed_df = recommender.recommend_from_pool(
+                user_input=user_input,
+                pool_idx=pool_idx,
+                k=seed_k,
+                max_per_artist=4,
+                include_artists=artists,
+                include_genres=include_genres_final,
+                include_mode="prefer",
+                exclude_artists=exclude_artists,
+                exclude_genres=exclude_genres,
+                exclude_track_ids=set(),
+                allow_explicit=allow_explicit,
+                dontcare=dontcare,
+                weight_overrides=None,
+                shuffle_within_top=True,
+                random_state=123,
+                include_keywords=keywords,
+                exclude_keywords=exclude_keywords,
+            )
+
+            bridge_genres_seed = _bridge_genres_from_results(
+                seed_df,
+                exclude_genres=exclude_genres,
+                already_included_genres=include_genres_final,
+                top_n=25,
+            )
+
+        
+
+        # ----------------------------
+        # WIDE POOL
+        # - with regions: wide = broad regional universe
+        # - without regions: wide = artists + selected genres + bridge genres from strict seed
+        # ----------------------------
+        if region_isos:
+            wide_artists = []
+            wide_genres = []
+        else:
+            wide_artists = artists
+
+            wide_genres = []
+            seen_wide = set()
+            for g in (include_genres_final + bridge_genres_seed):
+                gs = str(g).strip()
+                gl = gs.lower()
+                if gs and gl not in seen_wide:
+                    seen_wide.add(gl)
+                    wide_genres.append(gs)
+
         universe_idx_wide = recommender.build_universe_indices(
-            include_artists=artists,   # keep artist focus if user selected artists (optional)
-            include_genres=[],         # <-- KEY: no genre hard filter
+            selected_regions=region_isos,
+            include_artists=wide_artists,
+            include_genres=wide_genres,
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
         )
@@ -709,8 +767,10 @@ def generate():
             shuffle_within_top=True,
             random_state=41,
             dontcare=dontcare,
-            popularity_tier=tier,
-            popularity_genres=genres_list,  # manual only, non include_genres_final
+            popularity_tier="",
+            popularity_genres=[],
+            selected_regions=region_isos,
+            manual_genres=genres_list,
         )
 
         if "_row_idx" not in pool_df_wide.columns:
@@ -733,7 +793,7 @@ def generate():
                 max_per_artist=cap,
                 include_artists=artists,
                 include_genres=include_genres_final,
-                include_mode="must_any",          # <-- NEW MODE (OR)
+                include_mode="prefer",          # <-- NEW MODE (OR)
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
                 exclude_track_ids=set(),          # (seed track exclusion handled in build_pool already)
@@ -766,7 +826,7 @@ def generate():
                 max_per_artist=4,
                 include_artists=artists or [],
                 include_genres=include_genres_final or [],
-                include_mode="must_any",          # <-- niente intrusi anche nel wide
+                include_mode="prefer",          # <-- niente intrusi anche nel wide
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
                 exclude_track_ids=already,
@@ -912,6 +972,7 @@ def generate():
         user_input["tempo"] = _get_float("tempo", 120.0)
 
     universe_idx = recommender.build_universe_indices(
+        selected_regions=region_isos,
         include_artists=artists,
         include_genres=include_genres_final,
         exclude_artists=exclude_artists,
@@ -922,7 +983,7 @@ def generate():
     # 1) Build a BIG pool from preset-like ranges (soft, but tempo can be HARD)
     pool_df = recommender.build_pool(
         user_input=user_input,
-        universe_idx=universe_idx,   # <--- FIX
+        universe_idx=universe_idx,
         ranges=ranges,
         lock_tempo=lock_tempo,
         allow_explicit=allow_explicit,
@@ -931,7 +992,9 @@ def generate():
         random_state=42,
         dontcare=dontcare,
         popularity_tier=tier,
-        popularity_genres=genres_list,  # manual only, non include_genres_final
+        popularity_genres=genres_list,
+        selected_regions=region_isos,
+        manual_genres=genres_list,
     )
 
     current_app.logger.info(f"POOL strict size: {len(pool_df)}")
@@ -946,15 +1009,71 @@ def generate():
 
     TARGET = 50
 
+
     # ----------------------------
-    # WIDE POOL (for PASS C semantic bridge)
+    # Bootstrap semantic expansion for WIDE (only when no regions are selected)
+    # Reuse genres that actually emerge from a small strict seed.
     # ----------------------------
+    bridge_genres_seed: List[str] = []
+
+    if not region_isos and len(pool_df) > 0:
+        seed_k = min(30, max(10, TARGET // 2))
+
+        seed_df = recommender.recommend_from_pool(
+            user_input=user_input,
+            pool_idx=pool_idx,
+            k=seed_k,
+            max_per_artist=4,
+            include_artists=artists,
+            include_genres=include_genres_final,
+            include_mode="prefer",
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+            exclude_track_ids=set(),
+            allow_explicit=allow_explicit,
+            dontcare=dontcare,
+            weight_overrides=None,
+            shuffle_within_top=True,
+            random_state=123,
+            include_keywords=keywords,
+            exclude_keywords=exclude_keywords,
+        )
+
+        bridge_genres_seed = _bridge_genres_from_results(
+            seed_df,
+            exclude_genres=exclude_genres,
+            already_included_genres=include_genres_final,
+            top_n=25,
+        )
+
+    # ----------------------------
+    # WIDE POOL
+    # - with regions: wide = broad regional universe
+    # - without regions: wide = artists + selected genres + bridge genres from strict seed
+    # ----------------------------
+    if region_isos:
+        wide_artists = []
+        wide_genres = []
+    else:
+        wide_artists = artists
+
+        wide_genres = []
+        seen_wide = set()
+        for g in (include_genres_final + bridge_genres_seed):
+            gs = str(g).strip()
+            gl = gs.lower()
+            if gs and gl not in seen_wide:
+                seen_wide.add(gl)
+                wide_genres.append(gs)
+
     universe_idx_wide = recommender.build_universe_indices(
-        include_artists=[],
-        include_genres=[],         # <-- KEY
+        selected_regions=region_isos,
+        include_artists=wide_artists,
+        include_genres=wide_genres,
         exclude_artists=exclude_artists,
         exclude_genres=exclude_genres,
     )
+
 
     pool_df_wide = recommender.build_pool(
         user_input=user_input,
@@ -966,8 +1085,10 @@ def generate():
         shuffle_within_top=True,
         random_state=41,
         dontcare=dontcare,
-        popularity_tier=tier,
-        popularity_genres=genres_list,  # manual only, non include_genres_final
+        popularity_tier="",
+        popularity_genres=[],
+        selected_regions=region_isos,
+        manual_genres=genres_list,
     )
 
     current_app.logger.info(f"POOL wide size: {len(pool_df_wide)}")
@@ -1035,7 +1156,7 @@ def generate():
             max_per_artist=cap,
             include_artists=artists,
             include_genres=include_genres_final,
-            include_mode="must_any",               # OR: artisti o generi
+            include_mode="prefer",               # OR: artisti o generi
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
             exclude_track_ids=already,             # non ripetere
@@ -1072,7 +1193,7 @@ def generate():
             max_per_artist=4,
             include_artists=artists or [],
             include_genres=include_genres_final or [],
-            include_mode="must_any",          # <-- niente intrusi anche nel wide
+            include_mode="prefer",          # <-- niente intrusi anche nel wide
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
             exclude_track_ids=already,

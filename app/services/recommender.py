@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .data_store import DataStore
-
+from .region_genres import get_region_payload
 
 # ----------------------------
 # Helpers: robust parsing
@@ -329,6 +329,10 @@ class PlaylistRecommender:
         include_keywords = [str(x).strip().lower() for x in (include_keywords or []) if str(x).strip()]
         exclude_keywords = [str(x).strip().lower() for x in (exclude_keywords or []) if str(x).strip()]
 
+        ARTIST_PREF_BONUS = 0.28
+        GENRE_PREF_BONUS = 0.12
+        KW_BONUS = 0.06
+
 
         idx = np.asarray(pool_idx, dtype=np.int64)
         if idx.size == 0:
@@ -418,21 +422,36 @@ class PlaylistRecommender:
                 if flag and f in self._feat_idx:
                     w_req[self._feat_idx[f]] = 0.0
 
-        # --- prefer (two-pass) ---
-        pref_mask = np.zeros(idx.size, dtype=bool)
-        if include_artists:
-            pref_mask |= np.isin(idx, inc_artist_idx)
-        if include_genres:
-            pref_mask |= np.isin(idx, inc_genre_idx)
+        # --- prefer (three-pass, hierarchical) ---
+        artist_pref_mask = np.zeros(idx.size, dtype=bool)
+        genre_pref_mask = np.zeros(idx.size, dtype=bool)
+
+        if include_artists and inc_artist_idx.size:
+            artist_pref_mask = np.isin(idx, inc_artist_idx)
+
+        if include_genres and inc_genre_idx.size:
+            genre_pref_mask = np.isin(idx, inc_genre_idx)
 
         if inc_mode == "prefer" and (include_artists or include_genres):
-            idx_pref = idx[pref_mask]
-            idx_rest = idx[~pref_mask]
+            # Priority:
+            # 1) tracks matching included artists
+            # 2) tracks matching included genres but NOT already in artist tier
+            # 3) all the rest
+            idx_artist_pref = idx[artist_pref_mask]
+            idx_genre_pref = idx[~artist_pref_mask & genre_pref_mask]
+            idx_rest = idx[~artist_pref_mask & ~genre_pref_mask]
         else:
-            idx_pref = np.array([], dtype=np.int64)
+            idx_artist_pref = np.array([], dtype=np.int64)
+            idx_genre_pref = np.array([], dtype=np.int64)
             idx_rest = idx
 
-        def pick_from(local_idx: np.ndarray, need: int, already_picked: Optional[np.ndarray] = None) -> List[int]:
+        def pick_from(
+            local_idx: np.ndarray,
+            need: int,
+            already_picked: Optional[np.ndarray] = None,
+            artist_bonus: float = 0.0,
+            genre_bonus: float = 0.0,
+        ) -> List[int]:
             if need <= 0 or local_idx.size == 0:
                 return []
             if already_picked is not None and already_picked.size:
@@ -442,7 +461,17 @@ class PlaylistRecommender:
 
             dloc = self._weighted_distance(self.X[local_idx], u_scaled, w_req)
 
-            # SOFT: include keywords boost (reduce distance if keyword matches)
+            # SOFT: artist boost
+            if artist_bonus > 0.0 and include_artists and inc_artist_idx.size:
+                artist_hits = np.isin(local_idx, inc_artist_idx).astype(np.float32)
+                dloc = dloc - (artist_hits * float(artist_bonus))
+
+            # SOFT: genre boost
+            if genre_bonus > 0.0 and include_genres and inc_genre_idx.size:
+                genre_hits = np.isin(local_idx, inc_genre_idx).astype(np.float32)
+                dloc = dloc - (genre_hits * float(genre_bonus))
+
+            # SOFT: include keywords boost
             if include_keywords:
                 blob = self._kw_blob.iloc[local_idx].to_numpy(dtype=str)
                 hits = np.zeros(local_idx.size, dtype=np.float32)
@@ -451,8 +480,6 @@ class PlaylistRecommender:
                         continue
                     hits += (np.char.find(blob, kw) >= 0).astype(np.float32)
 
-                # tune: each hit reduces distance a bit (distance is "lower is better")
-                KW_BONUS = 0.06
                 dloc = dloc - (hits * KW_BONUS)
 
 
@@ -473,13 +500,39 @@ class PlaylistRecommender:
             )
 
         selected: List[int] = []
-        picked1 = pick_from(idx_pref, int(k))
+
+        # Pass 1: included artists first
+        picked1 = pick_from(
+            idx_artist_pref,
+            int(k),
+            artist_bonus=ARTIST_PREF_BONUS,
+            genre_bonus=GENRE_PREF_BONUS,   # nice extra if a track matches both
+        )
         selected.extend(picked1)
 
+        # Pass 2: included genres next
         remaining = int(k) - len(selected)
         if remaining > 0:
-            picked2 = pick_from(idx_rest, remaining, already_picked=np.asarray(selected, dtype=np.int64))
+            picked2 = pick_from(
+                idx_genre_pref,
+                remaining,
+                already_picked=np.asarray(selected, dtype=np.int64),
+                artist_bonus=0.0,
+                genre_bonus=GENRE_PREF_BONUS,
+            )
             selected.extend(picked2)
+
+        # Pass 3: everything else
+        remaining = int(k) - len(selected)
+        if remaining > 0:
+            picked3 = pick_from(
+                idx_rest,
+                remaining,
+                already_picked=np.asarray(selected, dtype=np.int64),
+                artist_bonus=0.0,
+                genre_bonus=0.0,
+            )
+            selected.extend(picked3)
 
         if not selected:
             return pd.DataFrame()
@@ -760,28 +813,9 @@ class PlaylistRecommender:
             exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in chosen_ranges.items()}
             return filtered, exp_for_score
 
-        # If tempo is requested but locked => never expand tempo
-        if lock_tempo:
-            filtered = self._filter_by_ranges(idx, chosen_ranges)  # tempo remains original bounds
-            exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in chosen_ranges.items()}
-            return filtered, exp_for_score
-
-        # Otherwise expand tempo as last resort (legacy)
-        max_len_t = len(self.config.expand_steps.get("tempo", (0.0,)))
-        best_all = None
-        for j in range(max_len_t):
-            expanded2 = dict(chosen_ranges)
-            expanded2["tempo"] = self._expanded_range("tempo", target_ranges["tempo"], step_for("tempo", j))
-            filtered2 = self._filter_by_ranges(idx, expanded2)
-            best_all = expanded2
-            if filtered2.size >= int(k):
-                exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in expanded2.items()}
-                return filtered2, exp_for_score
-
-        if best_all is None:
-            best_all = dict(chosen_ranges)
-        filtered = self._filter_by_ranges(idx, best_all)
-        exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in best_all.items()}
+        # Tempo is always hard: never expand it
+        filtered = self._filter_by_ranges(idx, chosen_ranges)
+        exp_for_score = {f: self._make_finite_bounds(f, a, b) for f, (a, b) in chosen_ranges.items()}
         return filtered, exp_for_score
 
     # -----------------------------
@@ -851,6 +885,102 @@ class PlaylistRecommender:
                 idx = idx[~np.isin(idx, ex_idx)]
 
         return idx.astype(np.int64)
+
+
+    def _normalize_region_inputs(self, regions: Optional[List[str]]) -> List[str]:
+        return [str(x).strip().upper() for x in (regions or []) if str(x).strip()]
+
+
+
+    from .region_genres import get_region_payload
+    def _get_region_genres_ranked(
+        self,
+        regions: Optional[List[str]],
+        top_n_per_region: int = 10,
+    ) -> Tuple[List[str], Dict[str, List[str]]]:
+        regions = self._normalize_region_inputs(regions)
+        if not regions:
+            return [], {}
+
+        merged: List[str] = []
+        per_region: Dict[str, List[str]] = {}
+
+        for iso in regions:
+            payload = get_region_payload(iso=iso, top_n=120)
+            if not payload.get("ok"):
+                continue
+
+            ranked = payload.get("expanded_genres_ranked", []) or []
+            top_genres = [g for g, _c in ranked[:top_n_per_region]]
+            per_region[iso] = top_genres
+
+            for g in top_genres:
+                if g not in merged:
+                    merged.append(g)
+
+        return merged, per_region
+
+
+    def _resolve_popularity_focus_genres(
+        self,
+        *,
+        region_genres: Optional[List[str]] = None,
+        manual_genres: Optional[List[str]] = None,
+        max_genres: int = 10,
+    ) -> List[str]:
+        region_genres = [str(x).strip() for x in (region_genres or []) if str(x).strip()]
+        manual_genres = [str(x).strip() for x in (manual_genres or []) if str(x).strip()]
+
+        if region_genres:
+            if manual_genres:
+                manual_in_region = []
+                region_set = set(region_genres)
+                for g in manual_genres:
+                    if g in region_set:
+                        manual_in_region.append(g)
+
+                if manual_in_region:
+                    return manual_in_region[:max_genres]
+
+            return region_genres[:max_genres]
+
+        return manual_genres[:max_genres]
+
+
+    def _build_region_universe_indices(
+        self,
+        *,
+        selected_regions: Optional[List[str]] = None,
+        exclude_artists: Optional[List[str]] = None,
+        exclude_genres: Optional[List[str]] = None,
+        top_n_per_region: int = 120,
+    ) -> np.ndarray:
+        regions = self._normalize_region_inputs(selected_regions)
+        if not regions:
+            return np.arange(len(self.df), dtype=np.int64)
+
+        region_genres_all = []
+
+        for iso in regions:
+            payload = get_region_payload(iso=iso, top_n=top_n_per_region)
+            if not payload.get("ok"):
+                continue
+            region_genres_all.extend(payload.get("genres", []) or [])
+
+        region_genres_all = list(dict.fromkeys([g for g in region_genres_all if g]))
+        if not region_genres_all:
+            return np.arange(len(self.df), dtype=np.int64)
+
+        universe = self.store.get_row_indices_by_genres(region_genres_all)
+        universe = np.asarray(universe, dtype=np.int64)
+
+        universe = self._apply_exclusions(
+            universe,
+            exclude_artists=exclude_artists,
+            exclude_genres=exclude_genres,
+        )
+        return universe.astype(np.int64)
+
 
     # -----------------------------
     # Internals: scaling + distance + constraints
@@ -942,6 +1072,7 @@ class PlaylistRecommender:
     def build_universe_indices(
         self,
         *,
+        selected_regions: Optional[List[str]] = None,
         include_artists: Optional[List[str]] = None,
         include_genres: Optional[List[str]] = None,
         exclude_artists: Optional[List[str]] = None,
@@ -951,6 +1082,16 @@ class PlaylistRecommender:
         include_genres = [str(x).strip() for x in (include_genres or []) if str(x).strip()]
         exclude_artists = [str(x).strip() for x in (exclude_artists or []) if str(x).strip()]
         exclude_genres = [str(x).strip() for x in (exclude_genres or []) if str(x).strip()]
+
+        selected_regions = self._normalize_region_inputs(selected_regions)
+
+        if selected_regions:
+            return self._build_region_universe_indices(
+                selected_regions=selected_regions,
+                exclude_artists=exclude_artists,
+                exclude_genres=exclude_genres,
+                top_n_per_region=120,
+            )
 
         if not include_artists and not include_genres:
             universe = np.arange(len(self.df), dtype=np.int64)
@@ -987,14 +1128,19 @@ class PlaylistRecommender:
         None means open bound.
         """
         t = (tier or "").strip().lower()
+
         if t == "mainstream":
-            return (0.80, 1.00)   # top 20% within scope
+            return (0.75, 1.00)   # top quartile
+
         if t == "balanced":
-            return (0.40, 1.00)   # top 60%
+            return (0.50, 1.00)   # top half
+
         if t == "niche":
-            return (0.15, 0.60)   # mid-low popularity
-        if t in {"deep", "discovery"}:
-            return (0.00, 0.25)   # bottom 25%
+            return (0.25, 0.75)   # middle band
+
+        if t in {"deep cuts", "deep", "discovery"}:
+            return (0.00, 0.50)   # bottom half
+
         return (None, None)
 
     def _apply_popularity_tier(
@@ -1005,6 +1151,8 @@ class PlaylistRecommender:
         pool_size: int,
         genres_manual: Optional[List[str]] = None,
         scoped: bool = False,
+        selected_regions: Optional[List[str]] = None,
+        region_focus_genres: Optional[List[str]] = None,
     ) -> np.ndarray:
         """
         Popularity filter:
@@ -1028,7 +1176,9 @@ class PlaylistRecommender:
         # ----------------------------
         # ABSOLUTE mode (no manual genres)
         # ----------------------------
-        gman = [str(g).strip() for g in (genres_manual or []) if str(g).strip()]
+        selected_regions = self._normalize_region_inputs(selected_regions)
+        focus_genres = [str(g).strip() for g in (region_focus_genres or []) if str(g).strip()]
+        gman = focus_genres if focus_genres else [str(g).strip() for g in (genres_manual or []) if str(g).strip()]
 
         if not gman:
 
@@ -1178,6 +1328,8 @@ class PlaylistRecommender:
         lock_tempo: bool = False,
         popularity_tier: str = "",
         popularity_genres: Optional[List[str]] = None,
+        selected_regions: Optional[List[str]] = None,
+        manual_genres: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         """
         Build a ranked candidate pool from the track universe.
@@ -1261,6 +1413,19 @@ class PlaylistRecommender:
         ranges = ranges or {}
         target_ranges = self._normalize_ranges(ranges)
 
+        selected_regions = self._normalize_region_inputs(selected_regions)
+
+        region_top_genres, _per_region = self._get_region_genres_ranked(
+            selected_regions,
+            top_n_per_region=10,
+        )
+
+        focus_genres = self._resolve_popularity_focus_genres(
+            region_genres=region_top_genres if selected_regions else None,
+            manual_genres=manual_genres if manual_genres is not None else popularity_genres,
+            max_genres=10,
+        )
+
         expanded_ranges_finite = None
         if target_ranges:
             idx, expanded_ranges_finite = self._filter_with_controlled_feature_expansion(
@@ -1278,7 +1443,9 @@ class PlaylistRecommender:
                 tier=popularity_tier,
                 pool_size=min(pool_size, 2000),
                 genres_manual=popularity_genres,
-                scoped=bool(target_ranges),   # True se preset/ranges attivi
+                scoped=bool(target_ranges),
+                selected_regions=selected_regions,
+                region_focus_genres=focus_genres,
             )
             if idx.size == 0:
                 return _empty_pool_df()
