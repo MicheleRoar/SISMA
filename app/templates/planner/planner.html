@@ -45,24 +45,23 @@
 
           <div class="section-title">Slot</div>
 
-          <div id="slotInfo" class="hint">
-            Clicca una cella per vedere la playlist.
-          </div>
-
-          <div class="slot-controls">
-
-            <div class="field">
-              <label for="slotColorEdit">Color</label>
-              <input id="slotColorEdit" type="color" value="#FFD403" />
-            </div>
-
+          <div class="slot-header">
+            <div id="slotPeriod" class="slot-period">—</div>
+            <div id="slotTime" class="slot-time">—</div>
           </div>
 
           <div class="slot-stats">
 
             <div class="section-title small">Audio profile</div>
 
-            <div class="stat-row">
+            <div class="stat-row stat-color">
+              <span>Color</span>
+              <div class="color-box">
+                <input id="slotColorEdit" type="color" value="#FFD403" />
+              </div>
+            </div>
+
+            <div class="stat-row stat-tracks">
               <span>Tracks</span>
               <span id="slotTracks">—</span>
             </div>
@@ -82,7 +81,7 @@
               <span id="slotDance">—</span>
             </div>
 
-            <div class="stat-row">
+            <div class="stat-row stat-bpm">
               <span>BPM</span>
               <span id="slotBpm">—</span>
             </div>

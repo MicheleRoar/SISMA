@@ -27,6 +27,8 @@
   const gridScroll = document.getElementById("gridScroll");
 
   const slotInfo = document.getElementById("slotInfo");
+  const slotPeriod = document.getElementById("slotPeriod");
+  const slotTimeInfo = document.getElementById("slotTime");
   const slotPlaylistList = document.getElementById("slotPlaylistList");
   const slotList = document.getElementById("slotList");
   const summaryStats = document.getElementById("summaryStats");
@@ -133,7 +135,7 @@
     const playlist = ensureTrackEnabledFlags(slot, dayISO);
     return playlist.filter(t => t.enabled !== false);
   }
-    
+
 
   function uniq(arr) {
     const out = [];
@@ -502,14 +504,16 @@
         selected.slotId = id;
         selected.dayISO = null;
         applySelectedSlotToEditor(slots[id], null);
-        if (slotInfo) slotInfo.textContent = `Selezionato: ${slots[id].name} (${slots[id].start}–${slots[id].end})`;
+        if (slotPeriod) slotPeriod.textContent = safeText(slots[id].name, "—");
+        if (slotTimeInfo) slotTimeInfo.textContent = `${slots[id].start}–${slots[id].end}`;
         repaintAll();
       });
     });
   }
 
   function renderSidebarEmpty(msg) {
-    if (slotInfo) slotInfo.textContent = msg || "—";
+    if (slotPeriod) slotPeriod.textContent = "—";
+    if (slotTimeInfo) slotTimeInfo.textContent = msg || "—";
     if (slotPlaylistList) slotPlaylistList.innerHTML = `<div class="hint">—</div>`;
   }
 
@@ -623,7 +627,8 @@
     selected = { slotId, dayISO };
     repaintAll();
 
-    if (slotInfo) slotInfo.textContent = `${slot.name} • ${dayISO} • ${slot.start}–${slot.end}`;
+    if (slotPeriod) slotPeriod.textContent = safeText(slot.name, "—");
+    if (slotTimeInfo) slotTimeInfo.textContent = `${slot.start}–${slot.end}`;
 
     const playlist = ensureTrackEnabledFlags(slot, dayISO);
     applySelectedSlotToEditor(slot, dayISO);

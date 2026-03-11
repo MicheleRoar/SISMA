@@ -432,3 +432,137 @@ details.mini summary{
 .pl-item-checkable {
   cursor: pointer;
 }
+
+.panel-section {
+  margin-top: 18px;
+  padding: 18px 20px;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  border-radius: 22px;
+  background: linear-gradient(
+    180deg,
+    rgba(255,255,255,0.18) 0%,
+    rgba(255,255,255,0.08) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28);
+}
+
+.section-title {
+  margin-bottom: 12px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.section-title.small {
+  margin-bottom: 2px;
+}
+
+.slot-header {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+.slot-period {
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: #64748b;
+  line-height: 1.15;
+}
+
+.slot-time {
+  margin-top: 4px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.slot-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.slot-stats .section-title.small {
+  grid-column: 1 / -1;
+}
+
+.stat-row {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.38);
+}
+
+.stat-row span:first-child {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.stat-row span:last-child {
+  display: block;
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.stat-bpm {
+  background: rgba(255, 212, 3, 0.12);
+  border-color: rgba(255, 212, 3, 0.40);
+}
+
+.stat-color .color-box {
+  width: 76px;
+  height: 42px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.10);
+  background: rgba(255,255,255,0.25);
+}
+
+.stat-color input[type="color"] {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slot-genres {
+  margin-top: 18px;
+}
+
+.slot-genres ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0 0 0;
+  list-style: none;
+}
+
+.slot-genres li {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.50);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  color: #334155;
+  font-size: 0.80rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
