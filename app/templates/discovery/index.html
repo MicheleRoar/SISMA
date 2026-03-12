@@ -699,24 +699,38 @@
 
 
   <script>
-    // Build Download JSON link with current form parameters
+    // Download current query as JSON (keep button styling)
     (function() {
       const form = document.querySelector("form.form");
-      const download = document.getElementById("download_json");
-      if (!form || !download) return;
+      const downloadBtn = document.getElementById("download_json");
+      if (!form || !downloadBtn) return;
 
-      function updateDownloadLink() {
+      function buildDownloadUrl() {
         const params = new URLSearchParams(new FormData(form));
         params.set("format", "json");
-        const baseUrl = form.getAttribute("action").split("#")[0];
-        download.href = baseUrl + "?" + params.toString();
+
+        const action = form.getAttribute("action") || window.location.pathname;
+        const baseUrl = action.split("#")[0];
+
+        return baseUrl + "?" + params.toString();
       }
 
-      form.addEventListener("input", updateDownloadLink);
-      updateDownloadLink();
+      function handleDownload() {
+        window.location.href = buildDownloadUrl();
+      }
+
+      downloadBtn.addEventListener("click", handleDownload);
+
+      // opzionale: salviamo l'URL già pronto sul dataset per debug futuro
+      function syncDatasetUrl() {
+        downloadBtn.dataset.downloadUrl = buildDownloadUrl();
+      }
+
+      form.addEventListener("input", syncDatasetUrl);
+      form.addEventListener("change", syncDatasetUrl);
+      syncDatasetUrl();
     })();
   </script>
-
   <script src="{{ url_for('static', filename='js/main.js') }}"></script>
   <script src="{{ url_for('static', filename='js/discovery_to_planner.js') }}"></script>
   <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
