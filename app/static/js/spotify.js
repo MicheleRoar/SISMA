@@ -1,7 +1,7 @@
 // static/js/spotify.js
 (() => {
   // === CONFIG ===
-  const CLIENT_ID = "5c7386061e1b4d46ac74c69d70cdee21";
+  const CLIENT_ID = "dab7fc55bfee44ce9da99573fef9df28";
   const REDIRECT_URI = "http://127.0.0.1:5001/spotify/callback";
   const SCOPES = ["playlist-modify-private"].join(" ");
 
