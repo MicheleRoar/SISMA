@@ -13,8 +13,6 @@
     (async () => {
       try {
         await window.spotifyHandleCallback();
-        // torna alla home (puoi anche puntare a #results)
-        window.location.href = "/#results";
       } catch (e) {
         document.body.innerHTML = "<pre>" + (e?.message || String(e)) + "</pre>";
       }

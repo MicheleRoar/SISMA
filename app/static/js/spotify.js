@@ -29,8 +29,20 @@
 
   function saveSelectionState() {
     sessionStorage.setItem("sisma_return_url", window.location.href);
+
     const selected = getSelectedTrackIdsFromTable();
     sessionStorage.setItem("sisma_selected_tracks", JSON.stringify(selected));
+
+    const form = document.getElementById("playlist_form");
+    if (form && document.querySelector(".song-table")) {
+      const params = new URLSearchParams(new FormData(form));
+      params.set("format", "json");
+
+      const baseUrl = (form.getAttribute("action") || window.location.pathname).split("#")[0];
+      const jsonUrl = `${baseUrl}?${params.toString()}`;
+
+      sessionStorage.setItem("sisma_discovery_json_url", jsonUrl);
+    }
   }
 
   function restoreSelectionState() {
@@ -49,6 +61,38 @@
       el.checked = selectedSet.has(tid);
     });
   }
+
+
+  function restoreDiscoveryResultsIfNeeded() {
+    const jsonUrl = sessionStorage.getItem("sisma_discovery_json_url");
+    if (!jsonUrl) return;
+
+    // Se la tabella esiste già, pulisci e basta
+    if (document.querySelector(".song-table")) {
+      sessionStorage.removeItem("sisma_discovery_json_url");
+      return;
+    }
+
+    // Se non sei nel Discovery, non fare nulla
+    const form = document.getElementById("playlist_form");
+    if (!form) return;
+
+    try {
+      const htmlUrl = jsonUrl
+        .replace(/([?&])format=json(&|$)/, "$1")
+        .replace(/[?&]$/, "");
+
+      // evita redirect identico alla pagina corrente
+      const currentNoHash = window.location.href.split("#")[0];
+      if (currentNoHash === htmlUrl) return;
+
+      sessionStorage.removeItem("sisma_discovery_json_url");
+      window.location.href = htmlUrl;
+    } catch (e) {
+      console.error("Failed to restore discovery results:", e);
+    }
+  }
+  
 
   function base64urlEncode(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
@@ -157,6 +201,10 @@
     const data = await res.json();
     setToken(data.access_token, data.expires_in);
 
+    const returnUrl = sessionStorage.getItem("sisma_return_url") || "/";
+    sessionStorage.removeItem("spotify_code_verifier");
+
+    window.location.href = returnUrl;
     return data.access_token;
   }
 
@@ -394,9 +442,12 @@
     if (connectBtn) {
       connectBtn.addEventListener("click", async () => {
         try {
+          sessionStorage.setItem("sisma_return_url", window.location.href);
+
           if (document.querySelector(".include-track")) {
             saveSelectionState();
           }
+
           await spotifyLogin();
         } catch (e) {
           msg(`${e?.message || String(e)}`);
@@ -425,6 +476,7 @@
     }
 
     restoreSelectionState();
+    restoreDiscoveryResultsIfNeeded();
     updateButtons();
   });
 
