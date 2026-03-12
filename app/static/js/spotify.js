@@ -92,7 +92,7 @@
       console.error("Failed to restore discovery results:", e);
     }
   }
-  
+
 
   function base64urlEncode(arrayBuffer) {
     const bytes = new Uint8Array(arrayBuffer);
@@ -122,6 +122,42 @@
     if (!t || Date.now() > exp) return null;
     return t;
   }
+
+
+  function updateSpotifyStatusUI() {
+    const token = getToken();
+
+    const statusWrap = document.querySelector(".spotify-status");
+    const dot = statusWrap ? statusWrap.querySelector(".dot") : null;
+    const label = statusWrap ? statusWrap.querySelector(".muted") : null;
+
+    const connectBtn = document.getElementById("btn_spotify_connect");
+    const plannerBtn = document.getElementById("btnCommitSpotify");
+    const addBtn = document.getElementById("btn_spotify_add");
+
+    const connected = !!token;
+
+    if (dot) {
+      dot.classList.remove("dot-off", "dot-on");
+      dot.classList.add(connected ? "dot-on" : "dot-off");
+    }
+
+    if (label) {
+      label.textContent = connected
+        ? "Spotify: connected"
+        : "Spotify: not connected";
+    }
+
+    if (connectBtn) {
+      connectBtn.disabled = connected;
+      connectBtn.textContent = connected ? "Spotify Connected" : "Connect Spotify";
+      connectBtn.setAttribute("aria-disabled", connected ? "true" : "false");
+    }
+
+    if (plannerBtn) plannerBtn.disabled = !connected;
+    if (addBtn) addBtn.disabled = !connected;
+  }
+  
 
   async function spotifyFetch(path, { method = "GET", body } = {}) {
     const token = getToken();
@@ -203,6 +239,7 @@
 
     const returnUrl = sessionStorage.getItem("sisma_return_url") || "/";
     sessionStorage.removeItem("spotify_code_verifier");
+    sessionStorage.removeItem("sisma_return_url");
 
     window.location.href = returnUrl;
     return data.access_token;
@@ -427,11 +464,7 @@
   // UI wiring
   // =========================
   function updateButtons() {
-    const addBtn = document.getElementById("btn_spotify_add");
-    const plannerBtn = document.getElementById("btnCommitSpotify");
-
-    if (addBtn) addBtn.disabled = !getToken();
-    if (plannerBtn) plannerBtn.disabled = !getToken();
+    updateSpotifyStatusUI();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -442,6 +475,11 @@
     if (connectBtn) {
       connectBtn.addEventListener("click", async () => {
         try {
+          if (getToken()) {
+            updateSpotifyStatusUI();
+            return;
+          }
+
           sessionStorage.setItem("sisma_return_url", window.location.href);
 
           if (document.querySelector(".include-track")) {
