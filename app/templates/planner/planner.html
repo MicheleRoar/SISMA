@@ -115,6 +115,10 @@
             <span class="muted">Spotify: not connected</span>
           </div>
 
+          <button id="btn_spotify_connect" class="btn spotify" type="button">
+            Connect Spotify
+          </button>
+
           <button id="btnCommitSpotify" class="btn btn-spotify" type="button">
             Send to Spotify
           </button>
@@ -123,7 +127,9 @@
             Download timetable (JSON)
           </button>
 
-          <div class="hint tiny">Spotify = stub (per ora). JSON = export completo.</div>
+          <p id="spotify_msg" class="message" style="display:none;"></p>
+
+          <div class="hint tiny">Spotify = export playlist/week structure. JSON = export completo.</div>
         </section>
 
         <details class="mini">
@@ -159,6 +165,7 @@
     </main>
   </div>
 
-  <script src="{{ url_for('static', filename='js/planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/planner.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/spotify.js') }}"></script>
 </body>
 </html>

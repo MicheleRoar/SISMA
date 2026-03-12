@@ -1,7 +1,7 @@
 // static/js/spotify.js
 (() => {
   // === CONFIG ===
-  const CLIENT_ID = "dab7fc55bfee44ce9da99573fef9df28";
+  const CLIENT_ID = "5c7386061e1b4d46ac74c69d70cdee21";
   const REDIRECT_URI = "http://127.0.0.1:5001/spotify/callback";
   const SCOPES = ["playlist-modify-private"].join(" ");
 
@@ -94,7 +94,7 @@
 
     if (!res.ok) {
       const txt = await res.text();
-      throw new Error(`Spotify API ${res.status}: ${txt}`);
+      throw new Error(`Spotify API ${res.status} on ${method} ${path}: ${txt}`);
     }
 
     return res.json();
@@ -325,20 +325,24 @@
     // ordinamento stabile: settimana -> ora inizio -> nome slot -> giorno
     occurrences.sort((a, b) => {
       if (a.weekIndex !== b.weekIndex) return a.weekIndex - b.weekIndex;
+      if (a.dayISO !== b.dayISO) return a.dayISO.localeCompare(b.dayISO);
       if (a.start !== b.start) return a.start.localeCompare(b.start);
-      if (a.slotName !== b.slotName) return a.slotName.localeCompare(b.slotName, undefined, { sensitivity: "base" });
-      return a.dayISO.localeCompare(b.dayISO);
+      return a.slotName.localeCompare(b.slotName, undefined, { sensitivity: "base" });
     });
 
     return occurrences;
   }
 
-  function buildPlannerPlaylistName(entry) {
-    // Versione sicura: evita nomi duplicati
-    return `Week ${entry.weekIndex} - ${entry.slotName} - ${entry.start}-${entry.end} - ${entry.weekdayLabel} ${entry.dayISO}`;
+  function formatHourDot(s) {
+    return String(s || "").trim().replace(":", ".");
+  }
 
-    // Se vuoi davvero il formato corto che hai scritto, usa questa riga al posto di sopra:
-    // return `Week ${entry.weekIndex} - ${entry.slotName} - ${entry.start}-${entry.end}`;
+  function buildPlannerPlaylistName(entry) {
+    return [
+      `Week_${entry.weekIndex}`,
+      entry.weekdayLabel,
+      `${entry.slotName} ${formatHourDot(entry.start)} - ${formatHourDot(entry.end)}`
+    ].join(" - ");
   }
 
   async function commitPlannerToSpotify() {
@@ -390,7 +394,9 @@
     if (connectBtn) {
       connectBtn.addEventListener("click", async () => {
         try {
-          saveSelectionState();
+          if (document.querySelector(".include-track")) {
+            saveSelectionState();
+          }
           await spotifyLogin();
         } catch (e) {
           msg(`${e?.message || String(e)}`);

@@ -48,7 +48,6 @@
   const btnNextWindow = document.getElementById("btnNextWindow");
   const windowLabel   = document.getElementById("windowLabel");
 
-  const btnCommitSpotify = document.getElementById("btnCommitSpotify");
   const btnDownloadTimetable = document.getElementById("btnDownloadTimetable");
 
   const debugBox = document.getElementById("debugBox");
@@ -791,44 +790,6 @@
     if (slotInfo) slotInfo.textContent = `Export pronto: ${items.length} occorrenze.`;
   }
 
-  async function commitSpotifyStub() {
-    // beta behavior: call stub endpoint with current window plan
-    const slotIds = Object.keys(slots);
-    if (!slotIds.length) return;
-
-    const plan = [];
-    for (const slotId of slotIds) {
-      const slot = slots[slotId];
-      const days = occurrencesInViewForSlot(slot);
-      for (const dayISO of days) {
-        plan.push({
-          slot_id: slotId,
-          day_iso: dayISO,
-          start: slot.start,
-          end: slot.end,
-          name: slot.name,
-          color: slot.color,
-          tracks: getEnabledPlaylist(slot, dayISO),
-        });
-      }
-    }
-
-    try {
-      const res = await fetch("/planner/api/commit_plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      setDebug({ commit_plan: data });
-      if (slotInfo) slotInfo.textContent = "Spotify commit: stub ok (vedi Debug).";
-    } catch (e) {
-      setDebug({ commit_plan_error: String(e.message || e) });
-      if (slotInfo) slotInfo.textContent = `Spotify commit: errore (${e.message})`;
-    }
-  }
-
   // ---------------- Scroll sync (header) ----------------
   function bindScrollSync() {
     if (!gridScroll || !daysHead) return;
@@ -857,7 +818,7 @@
 
   if (btnExportPlan) btnExportPlan.addEventListener("click", exportTimetableJSON);
   if (btnDownloadTimetable) btnDownloadTimetable.addEventListener("click", exportTimetableJSON);
-  if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
+  //if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
 
   if (btnClearPlan) btnClearPlan.addEventListener("click", clearAll);
   if (btnPrevWindow) btnPrevWindow.addEventListener("click", () => shiftWindow(-14));
