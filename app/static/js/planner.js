@@ -823,69 +823,119 @@
 
 
   function consumePlannerDraftFromSession() {
-  const raw = sessionStorage.getItem("sisma_planner_draft");
-  if (!raw) return false;
+    const raw = sessionStorage.getItem("sisma_planner_draft");
+    if (!raw) return false;
 
-  let draft;
-  try {
-    draft = JSON.parse(raw);
-  } catch (e) {
-    console.error("Invalid sisma_planner_draft:", e);
-    sessionStorage.removeItem("sisma_planner_draft");
-    return false;
-  }
-
-  const slotDraft = draft?.slot || {};
-  const discoveryDraft = draft?.discovery || {};
-  const generationDraft = draft?.generation || {};
-
-  const newSlot = {
-    id: null,
-    name: safeText(slotDraft.name, "Slot"),
-    color: safeText(slotDraft.color, "#FFD403"),
-    start: safeText(slotDraft.start, "10:00"),
-    end: safeText(slotDraft.end, "11:00"),
-    weekdays: normalizeWeekdays(slotDraft.weekdays),
-    weeks: Math.max(1, Number(slotDraft.weeks) || 2),
-
-    discovery: discoveryDraft || {},
-    playlistsByDay: {},
-
-    k: Number.isFinite(Number(generationDraft.k)) ? Number(generationDraft.k) : DEFAULT_K,
-    max_per_artist: Number.isFinite(Number(generationDraft.max_per_artist))
-      ? Number(generationDraft.max_per_artist)
-      : DEFAULT_MAX_PER_ARTIST,
-    cooldown_days: Number.isFinite(Number(generationDraft.cooldown_days))
-      ? Number(generationDraft.cooldown_days)
-      : DEFAULT_COOLDOWN_DAYS,
-  };
-
-  const slotId = buildSlotId(newSlot, discoveryDraft);
-  newSlot.id = slotId;
-
-  // usa lo stato attuale della griglia per verificare sovrapposizioni
-  rebuildGridStateFromSlots();
-
-  const conflictIds = findConflictingSlotIds(newSlot, slotId);
-  if (conflictIds.length) {
-    const ok = confirmOverwriteConflicts(conflictIds);
-    if (!ok) {
+    let draft;
+    try {
+      draft = JSON.parse(raw);
+    } catch (e) {
+      console.error("Invalid sisma_planner_draft:", e);
       sessionStorage.removeItem("sisma_planner_draft");
       return false;
     }
 
-    conflictIds.forEach(id => {
-      delete slots[id];
-    });
+    const slotDraft = draft?.slot || {};
+    const discoveryDraft = draft?.discovery || {};
+    const generationDraft = draft?.generation || {};
+    const generatedSlot = draft?.generated_slot || null;
+    const generatedStartDateISO = draft?.generated_startDateISO || null;
+
+    if (generatedStartDateISO) {
+      const parsed = new Date(`${generatedStartDateISO}T00:00:00`);
+      if (!Number.isNaN(parsed.getTime())) {
+        startDate = getStartOfWeekMonday(parsed);
+      }
+    }
+
+    const newSlot =
+      generatedSlot && typeof generatedSlot === "object"
+        ? {
+            ...generatedSlot,
+            id: null,
+            name: safeText(generatedSlot.name ?? slotDraft.name, "Slot"),
+            color: safeText(generatedSlot.color ?? slotDraft.color, "#FFD403"),
+            start: safeText(generatedSlot.start ?? slotDraft.start, "10:00"),
+            end: safeText(generatedSlot.end ?? slotDraft.end, "11:00"),
+            weekdays: normalizeWeekdays(generatedSlot.weekdays ?? slotDraft.weekdays),
+            weeks: Math.max(1, Number(generatedSlot.weeks ?? slotDraft.weeks) || 2),
+
+            discovery: generatedSlot.discovery || discoveryDraft || {},
+
+            playlistsByDay:
+              generatedSlot.playlistsByDay &&
+              typeof generatedSlot.playlistsByDay === "object"
+                ? generatedSlot.playlistsByDay
+                : {},
+
+            k: Number.isFinite(Number(generatedSlot.k))
+              ? Number(generatedSlot.k)
+              : (Number.isFinite(Number(generationDraft.k))
+                  ? Number(generationDraft.k)
+                  : DEFAULT_K),
+
+            max_per_artist: Number.isFinite(Number(generatedSlot.max_per_artist))
+              ? Number(generatedSlot.max_per_artist)
+              : (Number.isFinite(Number(generationDraft.max_per_artist))
+                  ? Number(generationDraft.max_per_artist)
+                  : DEFAULT_MAX_PER_ARTIST),
+
+            cooldown_days: Number.isFinite(Number(generatedSlot.cooldown_days))
+              ? Number(generatedSlot.cooldown_days)
+              : (Number.isFinite(Number(generationDraft.cooldown_days))
+                  ? Number(generationDraft.cooldown_days)
+                  : DEFAULT_COOLDOWN_DAYS),
+          }
+        : {
+            id: null,
+            name: safeText(slotDraft.name, "Slot"),
+            color: safeText(slotDraft.color, "#FFD403"),
+            start: safeText(slotDraft.start, "10:00"),
+            end: safeText(slotDraft.end, "11:00"),
+            weekdays: normalizeWeekdays(slotDraft.weekdays),
+            weeks: Math.max(1, Number(slotDraft.weeks) || 2),
+
+            discovery: discoveryDraft || {},
+            playlistsByDay: {},
+
+            k: Number.isFinite(Number(generationDraft.k))
+              ? Number(generationDraft.k)
+              : DEFAULT_K,
+
+            max_per_artist: Number.isFinite(Number(generationDraft.max_per_artist))
+              ? Number(generationDraft.max_per_artist)
+              : DEFAULT_MAX_PER_ARTIST,
+
+            cooldown_days: Number.isFinite(Number(generationDraft.cooldown_days))
+              ? Number(generationDraft.cooldown_days)
+              : DEFAULT_COOLDOWN_DAYS,
+          };
+
+    const slotId = buildSlotId(newSlot, newSlot.discovery || discoveryDraft);
+    newSlot.id = slotId;
 
     rebuildGridStateFromSlots();
-  }
 
-  slots[slotId] = newSlot;
-  save();
-  sessionStorage.removeItem("sisma_planner_draft");
-  return true;
-}
+    const conflictIds = findConflictingSlotIds(newSlot, slotId);
+    if (conflictIds.length) {
+      const ok = confirmOverwriteConflicts(conflictIds);
+      if (!ok) {
+        sessionStorage.removeItem("sisma_planner_draft");
+        return false;
+      }
+
+      conflictIds.forEach((id) => {
+        delete slots[id];
+      });
+
+      rebuildGridStateFromSlots();
+    }
+
+    slots[slotId] = newSlot;
+    save();
+    sessionStorage.removeItem("sisma_planner_draft");
+    return true;
+  }
 
 
   // ---------------- Scroll sync (header) ----------------
