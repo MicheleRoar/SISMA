@@ -37,7 +37,8 @@
 
           <div class="panel-actions">
             <button id="btnClearPlan" class="btn secondary" type="button">Clear</button>
-            <button id="btnExportPlan" class="btn btn-primary" type="button">Export</button>
+            <button id="btnLoadPlan" class="btn btn-primary" type="button">Load</button>
+            <input id="fileLoadPlan" type="file" accept="application/json" hidden />
           </div>
         </div>
 
@@ -124,7 +125,7 @@
           </button>
 
           <button id="btnDownloadTimetable" class="btn secondary" type="button">
-            Download timetable (JSON)
+            Save JSON
           </button>
 
           <p id="spotify_msg" class="message" style="display:none;"></p>

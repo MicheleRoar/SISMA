@@ -1052,5 +1052,49 @@ th.bpm-sort:hover {
   opacity: 0.85;
 }
 
+.spotify-export {
+  margin-top: 18px;
+}
 
+.spotify-export-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.spotify-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 52px;
+  padding: 0 16px;
+  border: 1px solid #d7dde5;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 1rem;
+  color: #1f2937;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.spotify-name-input:focus {
+  border-color: #1db954;
+  box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.12);
+}
+
+.spotify-export-row #btn_spotify_add {
+  flex: 0 0 320px;
+  height: 52px;
+  border-radius: 14px;
+}
+
+.spotify-msg {
+  margin: 10px 2px 0;
+  font-size: 0.95rem;
+  color: #64748b;
+}
+
+.spotify-msg a {
+  color: inherit;
+  text-decoration: underline;
+}
 

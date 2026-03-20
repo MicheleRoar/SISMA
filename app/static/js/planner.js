@@ -42,7 +42,8 @@
   const slotBpm    = document.getElementById("slotBpm");
   const slotGenres = document.getElementById("slotGenres");
 
-  const btnExportPlan = document.getElementById("btnExportPlan");
+  const btnLoadPlan = document.getElementById("btnLoadPlan");
+  const fileLoadPlan = document.getElementById("fileLoadPlan");
   const btnClearPlan  = document.getElementById("btnClearPlan");
   const btnPrevWindow = document.getElementById("btnPrevWindow");
   const btnNextWindow = document.getElementById("btnNextWindow");
@@ -733,7 +734,7 @@
       return;
     }
 
-    if (slotInfo) slotInfo.textContent = "Preparo export… (genero playlist mancanti)";
+    setDebug("Preparo export JSON...");
 
     const items = [];
 
@@ -819,6 +820,175 @@
     return window.confirm(
       `Questo slot si sovrappone a slot già presenti: ${names}. Vuoi sovrascriverli?`
     );
+  }
+
+
+  function normalizeImportedTrack(track) {
+    if (!track || typeof track !== "object") return null;
+
+    return {
+      ...track,
+      title: safeText(track.title ?? track.track_name ?? track.name, ""),
+      artist: safeText(track.artist ?? track.artists, ""),
+      genre: safeText(track.genre ?? track.track_genre, ""),
+      bpm: Number.isFinite(Number(track.bpm)) ? Number(track.bpm) : null,
+      energy: Number.isFinite(Number(track.energy)) ? Number(track.energy) : null,
+      danceability: Number.isFinite(Number(track.danceability)) ? Number(track.danceability) : null,
+      valence: Number.isFinite(Number(track.valence ?? track.mood))
+        ? Number(track.valence ?? track.mood)
+        : null,
+      enabled: typeof track.enabled === "boolean" ? track.enabled : true,
+    };
+  }
+
+  function inferWeekdaysFromItems(items) {
+    const set = new Set();
+    (items || []).forEach(item => {
+      const dayISO = safeText(item.day_iso, "");
+      if (!dayISO) return;
+      const d = new Date(`${dayISO}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return;
+      set.add(d.getDay());
+    });
+    const out = Array.from(set).sort((a, b) => a - b);
+    return out.length ? out : [1, 2, 3, 4, 5];
+  }
+
+  function inferWeeksFromItems(items, importedStartDate) {
+    if (!items?.length || !importedStartDate) return 2;
+
+    let maxOffset = 0;
+    items.forEach(item => {
+      const dayISO = safeText(item.day_iso, "");
+      if (!dayISO) return;
+      const d = new Date(`${dayISO}T00:00:00`);
+      if (Number.isNaN(d.getTime())) return;
+
+      const diffDays = Math.floor((d - importedStartDate) / (1000 * 60 * 60 * 24));
+      if (diffDays > maxOffset) maxOffset = diffDays;
+    });
+
+    return Math.max(1, Math.floor(maxOffset / 7) + 1);
+  }
+
+  function buildSlotIdFromImportedItems(slotItems) {
+    if (!slotItems?.length) return `slot_${Date.now()}`;
+
+    const first = slotItems[0];
+    const core = {
+      name: safeText(first.name, "Slot"),
+      start: safeText(first.start, "10:00"),
+      end: safeText(first.end, "11:00"),
+      color: safeText(first.color, "#FFD403"),
+      discovery: first.discovery || {},
+      days: slotItems.map(x => safeText(x.day_iso, "")).filter(Boolean).sort()
+    };
+
+    const h = hashSeed(JSON.stringify(core)).toString(16).slice(0, 10);
+    return `slot_${h}`;
+  }
+
+  function importPlanFromTimetablePayload(payload) {
+    if (!payload || typeof payload !== "object") {
+      throw new Error("JSON non valido.");
+    }
+
+    const items = Array.isArray(payload.items) ? payload.items : null;
+    if (!items || !items.length) {
+      throw new Error("Il file non contiene items da importare.");
+    }
+
+    const importedStartDateISO = safeText(payload.window_start, "");
+    const importedStartDate = importedStartDateISO
+      ? new Date(`${importedStartDateISO}T00:00:00`)
+      : getStartOfWeekMonday(todayStart());
+
+    if (Number.isNaN(importedStartDate.getTime())) {
+      throw new Error("window_start non valido nel JSON.");
+    }
+
+    const grouped = {};
+    items.forEach(item => {
+      const key = [
+        safeText(item.slot_id, ""),
+        safeText(item.name, ""),
+        safeText(item.start, ""),
+        safeText(item.end, "")
+      ].join("|");
+
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(item);
+    });
+
+    const importedSlots = {};
+
+    Object.values(grouped).forEach((slotItems) => {
+      if (!slotItems.length) return;
+
+      const first = slotItems[0];
+      const slotId = safeText(first.slot_id, "") || buildSlotIdFromImportedItems(slotItems);
+
+      const playlistsByDay = {};
+      slotItems.forEach(item => {
+        const dayISO = safeText(item.day_iso, "");
+        if (!dayISO) return;
+
+        const tracks = Array.isArray(item.tracks)
+          ? item.tracks.map(normalizeImportedTrack).filter(Boolean)
+          : [];
+
+        playlistsByDay[dayISO] = tracks;
+      });
+
+      importedSlots[slotId] = {
+        id: slotId,
+        name: safeText(first.name, "Slot"),
+        color: safeText(first.color, "#FFD403"),
+        start: safeText(first.start, "10:00"),
+        end: safeText(first.end, "11:00"),
+        weekdays: inferWeekdaysFromItems(slotItems),
+        weeks: inferWeeksFromItems(slotItems, importedStartDate),
+        discovery: first.discovery || {},
+        playlistsByDay,
+        k: DEFAULT_K,
+        max_per_artist: DEFAULT_MAX_PER_ARTIST,
+        cooldown_days: DEFAULT_COOLDOWN_DAYS,
+      };
+    });
+
+    startDate = getStartOfWeekMonday(importedStartDate);
+    slots = importedSlots;
+    selected = { slotId: null, dayISO: null };
+
+    save();
+    rebuildEverything();
+    renderSidebarEmpty("Planner caricato dal JSON.");
+    setDebug({
+      imported_slots: Object.keys(importedSlots).length,
+      imported_items: items.length,
+      window_start: fmtLocalISODate(startDate)
+    });
+  }
+
+  async function handleLoadPlanFile(file) {
+    if (!file) return;
+
+    const text = await file.text();
+    let payload;
+
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      window.alert("Il file selezionato non è un JSON valido.");
+      return;
+    }
+
+    try {
+      importPlanFromTimetablePayload(payload);
+    } catch (err) {
+      console.error(err);
+      window.alert(err?.message || "Impossibile caricare il planner da questo file.");
+    }
   }
 
 
@@ -967,7 +1137,17 @@
   if (slotColorEdit) slotColorEdit.addEventListener("input", onSlotEditorChange);
 
 
-  if (btnExportPlan) btnExportPlan.addEventListener("click", exportTimetableJSON);
+    if (btnLoadPlan && fileLoadPlan) {
+    btnLoadPlan.addEventListener("click", () => fileLoadPlan.click());
+
+    fileLoadPlan.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0] || null;
+      await handleLoadPlanFile(file);
+
+      // reset value so same file can be selected again later
+      e.target.value = "";
+    });
+  }
   if (btnDownloadTimetable) btnDownloadTimetable.addEventListener("click", exportTimetableJSON);
   //if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
 

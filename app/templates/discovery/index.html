@@ -681,11 +681,21 @@
           </table>
         </div>
 
-        <div class="spotify-actions">
-          <button class="btn spotify" type="button" id="btn_spotify_add" disabled>Add to Spotify</button>
-        </div>
+        <div class="spotify-export">
+          <div class="spotify-export-row">
+            <input
+              type="text"
+              id="spotify_playlist_name"
+              class="spotify-name-input"
+              placeholder="Playlist name"
+            >
+            <button class="btn spotify" type="button" id="btn_spotify_add" disabled>
+              Add to Spotify
+            </button>
+          </div>
 
-        <p id="spotify_msg" class="message" style="display:none;"></p>
+          <p id="spotify_msg" class="spotify-msg" style="display:none;"></p>
+        </div>
 
       {% else %}
         <p class="hint">Choose your criteria and generate a playlist.</p>
