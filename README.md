@@ -58,6 +58,9 @@ SISMA is composed of two complementary modules:
 ![Discovery Controls](docs/images/discovery_form.png)  
 *Constraint-based interface for defining the musical search space (artists, genres, filters).*
 
+![Region Selection](docs/images/region_map.png)  
+*Geographical filtering of the musical space, allowing region-specific cultural constraints.*
+
 ![Feature Space](docs/images/discovery_sliders.png)  
 *Continuous control of musical features such as energy, mood, tempo, and loudness.*
 
