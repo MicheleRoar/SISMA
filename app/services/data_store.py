@@ -94,7 +94,7 @@ class DataStore:
     def _norm_text(s: str) -> str:
         """
         Lower + strip + remove diacritics (accents).
-        Usata per generi.
+        Used for genres.
         """
         s = "" if s is None else str(s)
         s = unicodedata.normalize("NFD", s)
@@ -104,9 +104,9 @@ class DataStore:
     @staticmethod
     def _split_or_syntax(s: str) -> List[str]:
         """
-        Supporta una sintassi OR opzionale:
+        Supports an optional OR syntax:
           "a||b||c"
-        Senza cambiare la firma di get_row_indices_by_genre().
+        Without changing the signature of get_row_indices_by_genre().
         """
         if not s:
             return []
@@ -134,23 +134,23 @@ class DataStore:
         return list(self.feature_cols)
 
     def get_genres(self) -> List[str]:
-        # per il dropdown
+        # for the dropdown
         return list(getattr(self, "ui_genres", []))
 
     def get_all_genres(self) -> List[str]:
-        # per l’autocomplete
+        # for the autocomplete
         return list(getattr(self, "all_genres", []))
 
     def get_row_indices_by_genre(self, genre: str) -> np.ndarray:
         """
         New dataset: genre match is token-safe, using either:
-          1) cache genre->indices (fast path) on normalized tokens
+          1) cache genre->indexes (fast path) on normalized tokens
           2) bounded string column (|g1|g2|...) for safety
 
-        IMPORTANT PATCH:
-          - niente substring matching: cerca "|genre|" (non "genre" dentro "k-pop")
-          - se genre non matcha nulla -> ritorna array vuoto (nessun fallback globale)
-          - supporta OR con "||" (es. "italian pop||classic italian pop")
+        IMPORTANT PATCHES:
+          - no substring matching: search for "|genre|" (not "genre" in "k-pop")
+          - if genre does not match anything -> returns empty array (no global fallback)
+          - supports OR with "||" (e.g. "italian pop||classic italian pop")
         """
         df = self.get_df()
         if not genre:
@@ -162,7 +162,7 @@ class DataStore:
             return self.get_row_indices_by_genres(parts)
 
         if "genres_list" not in df.columns and "genres_str" not in df.columns:
-            # se non esistono colonne, comportamento legacy: tutto
+            # if no columns exist, legacy behavior: all
             return np.arange(len(df), dtype=np.int64)
 
         g = self._norm_text(genre)
@@ -189,20 +189,19 @@ class DataStore:
             token = f"|{g}|"
             mask = s.str.contains(re.escape(token), regex=True)
         else:
-            # genres_str è "g1|g2|g3": per match token-safe usiamo regex con boundaries di pipe
+            # genres_str è "g1|g2|g3": for match token-safe we use regex with pipe boundaries 
             # pattern: (^|\|)g(\||$)
             s = df[col].astype(str).map(self._norm_text)
             pattern = rf"(^|\|){re.escape(g)}(\||$)"
             mask = s.str.contains(pattern, regex=True)
 
         idx = np.flatnonzero(mask.to_numpy())
-        # NO fallback globale se non troviamo niente
+        # NO global fallback if we find nothing
         return idx.astype(np.int64)
 
     def get_row_indices_by_genres(self, genres: List[str]) -> np.ndarray:
         """
-        NEW (additiva, non rompe nulla):
-        Ritorna l'unione degli indici per una lista di generi (OR).
+        Returns the union of the indices for a list of genres (OR).
         """
         df = self.get_df()
         if not genres:
@@ -214,11 +213,11 @@ class DataStore:
 
         all_idx = []
         for g in parts:
-            # usa cache se possibile
+            # use cache if possibile
             if self._has_genre_cache and g in self._genre_to_indices:
                 all_idx.append(self._genre_to_indices[g])
             else:
-                # usa il metodo singolo (che è token-safe e ritorna vuoto se non matcha)
+                # use the single method (which is token-safe and returns empty if it doesn't match)
                 all_idx.append(self.get_row_indices_by_genre(g))
 
         if not all_idx:

@@ -364,13 +364,13 @@
 
   function buildPlannerOccurrences() {
     const raw = localStorage.getItem(LS_PLAN_KEY);
-    if (!raw) throw new Error("Planner vuoto in localStorage.");
+    if (!raw) throw new Error("Planner empty in localStorage.");
 
     const obj = JSON.parse(raw);
     const startDateISO = obj?.startDateISO;
     const slots = obj?.slots || {};
 
-    if (!startDateISO) throw new Error("startDateISO mancante nel planner.");
+    if (!startDateISO) throw new Error("startDateISO missing in planner.");
     const startDate = parseISODate(startDateISO);
 
     const occurrences = [];
@@ -412,7 +412,7 @@
       }
     }
 
-    // ordinamento stabile: settimana -> ora inizio -> nome slot -> giorno
+    // stable sorting: week -> start time -> slot name -> day
     occurrences.sort((a, b) => {
       if (a.weekIndex !== b.weekIndex) return a.weekIndex - b.weekIndex;
       if (a.dayISO !== b.dayISO) return a.dayISO.localeCompare(b.dayISO);

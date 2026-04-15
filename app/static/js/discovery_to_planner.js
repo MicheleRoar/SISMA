@@ -115,7 +115,6 @@
         throw new Error("Nessuno slot generato dal planner.");
       }
 
-      // In questo flusso ci aspettiamo un singolo slot generato
       const [, generatedSlot] = slotEntries[0];
 
       sessionStorage.setItem(

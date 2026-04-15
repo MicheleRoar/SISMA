@@ -32,7 +32,7 @@ def _as_set_str(x: Any) -> Set[str]:
 
 @bp.get("/")
 def index():
-    # Presets solo come fallback/compat (es. se arrivi al planner senza draft)
+    # Presets only as a fallback/compat (e.g. if you arrive at the planner without a draft)
     presets = list(PRESETS.keys())
     return render_template("planner/planner.html", presets=presets)
 
@@ -209,11 +209,11 @@ def api_prepare_plan():
 
         discovery = payload.get("discovery") or {}
         if not isinstance(discovery, dict):
-            return jsonify({"ok": False, "error": "discovery deve essere un oggetto"}), 400
+            return jsonify({"ok": False, "error": "discovery must be an object"}), 400
 
         rule = payload.get("rule") or {}
         if not isinstance(rule, dict):
-            return jsonify({"ok": False, "error": "rule deve essere un oggetto"}), 400
+            return jsonify({"ok": False, "error": "rule must be an object"}), 400
 
         k = int(payload.get("k", 50) or 50)
         max_per_artist = int(payload.get("max_per_artist", 2) or 2)

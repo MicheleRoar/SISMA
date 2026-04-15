@@ -1,12 +1,12 @@
 # app/services/presets.py
-# Preset derivati da Rules.xlsx — versione RANGE (min/max)
-# + campi Planner (bucket include/exclude + allow_explicit + fallback)
+# Presets derived from Rules.xlsx — RANGE version (min/max)
+# + Planner fields (include/exclude bucket + allow_explicit + fallback)
 #
 # NOTE (Feb 2026):
-# - Alcune feature (instrumentalness, acousticness, speechiness, liveness) possono essere "sparse" e
-#   ridurre drasticamente il pool se usate come filtri HARD.
-# - Per riempire sempre ~50 brani, le disattiviamo temporaneamente mettendo None.
-# - Restano HARD: tempo, energy, danceability, valence, loudness (+ eventuali buckets).
+# - Some features (instrumentality, acousticness, speechiness, liveness) can be "sparse" and
+# drastically reduce the pool if used as HARD filters.
+# - To always fill ~50 songs, we temporarily disable them by setting them to None.
+# - The following remain HARD: tempo, energy, danceability, valence, loudness (+ any buckets).
 
 PRESETS = {
     "Warm-up Daytime": dict(

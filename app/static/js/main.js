@@ -609,11 +609,11 @@
     input.addEventListener("keydown", (e) => {
       if (e.key !== "Enter") return;
 
-      // blocca il submit del form (altrimenti ti genera la playlist)
+      // block the form from being submitted (otherwise it will generate the playlist for you)
       e.preventDefault();
       e.stopPropagation();
 
-      // se dropdown aperto, prendi il primo suggerimento
+      // if dropdown open, take the first suggestion
       if (box.style.display === "block") {
         const first = box.querySelector(".suggestion-item");
         if (first) {
@@ -622,7 +622,7 @@
         }
       }
 
-      // altrimenti crea chip dalla keyword scritta
+      // otherwise create chips from the written keyword
       addGenre(input.value);
     });
 
@@ -1382,16 +1382,16 @@ function toggleGenreUIForRegionMode() {
 
   const on = isRegionMode();
 
-  // Chips manuali SEMPRE visibili (sono l’unica cosa che vogliamo mostrare)
+  // Manual chips ALWAYS visible (they are the only thing we want to show)
   if (chips) chips.style.display = "";
 
-  // Input SEMPRE utilizzabile: l’utente può aggiungere "salsa" dopo aver cliccato IT
+  // Input ALWAYS usable: the user can add "salsa" after clicking IT
   if (input) {
     input.disabled = false;
     input.placeholder = on ? "Add genre… (regions also active)" : "Add genre…";
   }
 
-  // chiudi suggerimenti quando cambi modalità
+  // close tips when switching modes
   if (sugg) sugg.style.display = "none";
 }
 
@@ -1404,12 +1404,12 @@ function toggleGenreUIForRegionMode() {
     return;
   }
 
-  // reimposta stato regioni
+  // reset regions status
   isos.forEach(iso => REGION_STATE.selected.add(iso));
   updateRegionStatus();
   writeRegionIsosHidden();
 
-  // fetch generi per ciascuna regione e applica union
+  // fetch genres for each region and apply union
   Promise.all(isos.map(fetchRegionGenres))
     .then(() => {
       toggleGenreUIForRegionMode();
@@ -1462,7 +1462,7 @@ function toggleGenreUIForRegionMode() {
   function setSelectedSet(set) {
     const normalized = normalizeSet(Array.from(set));
 
-    // fallback: mai vuoto
+    // fallback: never empty
     if (normalized.size === 0) {
       [1, 2, 3, 4, 5].forEach(x => normalized.add(x));
     }
@@ -1680,7 +1680,7 @@ function toggleGenreUIForRegionMode() {
   }
 
   async function applyRegionsFromList(isos){
-    // Usa il tuo meccanismo esistente: scrivi hidden e poi “rebuild” stato
+    // Use your existing mechanism: write hidden and then “rebuild” state
     const hidden = document.getElementById("region_isos");
     if (!hidden) return;
 
@@ -1843,7 +1843,6 @@ function toggleGenreUIForRegionMode() {
       await applySettings(obj);
     }catch(err){
       console.error("Load settings failed:", err);
-      // niente alert: resta silenzioso, vedi console
     }finally{
       fileLoad.value = ""; // allow re-upload same file
     }

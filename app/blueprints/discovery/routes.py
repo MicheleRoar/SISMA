@@ -365,8 +365,8 @@ def _build_bucket_weights(
 
 def _extract_genres_from_row(row: pd.Series) -> List[str]:
     """
-    Estrae generi da una riga risultati.
-    Supporta:
+    Extract genres from a row of results.
+    It supports:
       - genres_list (list)
       - genres_str ("a|b|c")
       - track_genre fallback ("a, b")
@@ -387,7 +387,7 @@ def _extract_genres_from_row(row: pd.Series) -> List[str]:
         if tg:
             out.extend([p.strip() for p in tg.split(",") if p.strip()])
 
-    # normalizza e dedup preservando ordine
+    # normalize and dedup saving order
     seen = set()
     cleaned = []
     for g in out:
@@ -406,8 +406,8 @@ def _bridge_genres_from_results(
     top_n: int = 25,
 ) -> List[str]:
     """
-    Prende i generi più frequenti presenti nei risultati,
-    escludendo quelli già nei filtri (manual+region) e quelli esclusi.
+    It takes the most frequent genres in the results,
+    excluding those already in the filters (manual + region) and those excluded.
     """
     if playlist_df is None or playlist_df.empty:
         return []
@@ -428,13 +428,13 @@ def _bridge_genres_from_results(
     if not cnt:
         return []
 
-    # più frequenti prima
+    # most frequent first
     return [g for g, _ in cnt.most_common(top_n)]
 
 
 def _seed_artists_from_results(playlist_df: pd.DataFrame, top_n: int = 20) -> List[str]:
     """
-    Artisti più frequenti tra i risultati (primary artist).
+    Most frequent artists among the results (primary artist).
     """
     if playlist_df is None or playlist_df.empty or "artists" not in playlist_df.columns:
         return []
@@ -498,7 +498,7 @@ def generate():
     store = current_app.config["DATASTORE"]
     preset = (request.args.get("preset") or "").strip()
 
-    # DEBUG — cosa arriva davvero dal form
+    # DEBUG — what really comes from the form
     current_app.logger.info("=== GENERATE QUERY START ===")
     current_app.logger.info(dict(request.args))
     current_app.logger.info("=== GENERATE QUERY END ===")
@@ -793,10 +793,10 @@ def generate():
                 max_per_artist=cap,
                 include_artists=artists,
                 include_genres=include_genres_final,
-                include_mode="prefer",          # <-- NEW MODE (OR)
+                include_mode="prefer",
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
-                exclude_track_ids=set(),          # (seed track exclusion handled in build_pool already)
+                exclude_track_ids=set(),
                 allow_explicit=allow_explicit,
                 dontcare=dontcare,
                 weight_overrides=None,
@@ -864,8 +864,8 @@ def generate():
                 if need > 0:
                     fill2 = recommender.recommend_from_pool(
                         user_input=user_input,
-                        pool_idx=pool_idx_wide,            # <-- KEY: wide pool
-                        k=need,                            # <-- only missing
+                        pool_idx=pool_idx_wide,
+                        k=need,
                         max_per_artist=4,
                         include_artists=seed_artists,
                         include_genres=bridge_genres,
@@ -929,7 +929,7 @@ def generate():
         msg = f"Similar to: <strong>{selected_label}</strong> ({len(playlist_df)} tracks).{extra}"
 
 
-        # ---- DEBUG GENERI EXTRA ----
+        # ---- DEBUG EXTRA GENRES----
         extra_genres = _debug_genres_not_in_filters(
             playlist_df,
             include_genres=include_genres_final,
@@ -937,7 +937,7 @@ def generate():
         )
 
         if extra_genres:
-            print("GENERI EMERSI NON NEI FILTRI:")
+            print("GENRES EMERGED NOT IN THE FILTERS:")
             for g in extra_genres:
                 print("  -", g)
 
@@ -1109,7 +1109,7 @@ def generate():
 
     CAPS = [2, 4, 8, 12]
 
-    # A0 — artist-only guarantee (se l'utente ha selezionato artisti)
+    # A0 — artist-only guarantee (if the user has selected artists)
     if artists:
         best_a0 = pd.DataFrame()
 
@@ -1121,7 +1121,7 @@ def generate():
                 max_per_artist=cap,
                 include_artists=artists,
                 include_genres=[],
-                include_mode="must",                 # HARD: deve essere dell'artista
+                include_mode="must",                 
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
                 exclude_track_ids=set(),
@@ -1137,14 +1137,14 @@ def generate():
             if len(tmp_a0) > len(best_a0):
                 best_a0 = tmp_a0
 
-            # stop early se già riempiamo una buona quota
+            # stop early if we already fill a good quota
             if len(best_a0) >= min(12, TARGET):
                 break
 
         if len(best_a0):
             playlist_df = best_a0.copy()
 
-    # A1 — selected buckets OR (come prima), ma senza duplicati
+    # A1 — selected buckets
     best_a1 = playlist_df
     already = set(best_a1["track_id"].astype(str)) if ("track_id" in best_a1.columns and len(best_a1)) else set()
 
@@ -1156,10 +1156,10 @@ def generate():
             max_per_artist=cap,
             include_artists=artists,
             include_genres=include_genres_final,
-            include_mode="prefer",               # OR: artisti o generi
+            include_mode="prefer",          
             exclude_artists=exclude_artists,
             exclude_genres=exclude_genres,
-            exclude_track_ids=already,             # non ripetere
+            exclude_track_ids=already,          
             allow_explicit=allow_explicit,
             dontcare=dontcare,
             weight_overrides=None,
@@ -1310,10 +1310,6 @@ def generate():
         playlist_df = playlist_df.sort_values(sort_cols, ascending=asc, na_position="last")
 
     playlist_df = playlist_df.reset_index(drop=True)
-
-
-
-
 
     if request.args.get("format", "").lower() == "json":
         return jsonify(playlist_df.to_dict(orient="records"))

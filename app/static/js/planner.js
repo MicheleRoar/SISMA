@@ -619,7 +619,7 @@
 
     const slot = slots[slotId];
     if (!slot) {
-      renderSidebarEmpty("Slot mancante (stato corrotto).");
+      renderSidebarEmpty("Missing slot (corrupted state).");
       return;
     }
 
@@ -635,7 +635,7 @@
 
     if (!playlist.length) {
       if (slotPlaylistList) {
-        slotPlaylistList.innerHTML = `<div class="hint">Nessun brano assegnato per questo giorno.</div>`;
+        slotPlaylistList.innerHTML = `<div class="hint">No songs assigned for this day.</div>`;
       }
       return;
     }
@@ -704,7 +704,7 @@
     startDate = getStartOfWeekMonday(d);
     save();
     rebuildEverything();
-    renderSidebarEmpty("Finestra cambiata. Clicca una cella.");
+    renderSidebarEmpty("Changed window. Click a cell.");
   }
 
   // ---------------- Export / Publish ----------------
@@ -730,11 +730,11 @@
   async function exportTimetableJSON() {
     const slotIds = Object.keys(slots);
     if (!slotIds.length) {
-      renderSidebarEmpty("Niente da esportare: aggiungi slot dal Discovery.");
+      renderSidebarEmpty("Nothing to export: add slots from Discovery.");
       return;
     }
 
-    setDebug("Preparo export JSON...");
+    setDebug("Preparing JSON export...");
 
     const items = [];
 
@@ -788,7 +788,7 @@
 
     URL.revokeObjectURL(url);
 
-    if (slotInfo) slotInfo.textContent = `Export pronto: ${items.length} occorrenze.`;
+    if (slotInfo) slotInfo.textContent = `Export ready: ${items.length} occurrencies.`;
   }
 
 
@@ -818,7 +818,7 @@
       .join(", ");
 
     return window.confirm(
-      `Questo slot si sovrappone a slot già presenti: ${names}. Vuoi sovrascriverli?`
+      `This slot overlaps with existing slots: ${names}. Do you want to overwrite them?`
     );
   }
 
@@ -890,12 +890,12 @@
 
   function importPlanFromTimetablePayload(payload) {
     if (!payload || typeof payload !== "object") {
-      throw new Error("JSON non valido.");
+      throw new Error("JSON not valid.");
     }
 
     const items = Array.isArray(payload.items) ? payload.items : null;
     if (!items || !items.length) {
-      throw new Error("Il file non contiene items da importare.");
+      throw new Error("The file contains no items to import.");
     }
 
     const importedStartDateISO = safeText(payload.window_start, "");
@@ -904,7 +904,7 @@
       : getStartOfWeekMonday(todayStart());
 
     if (Number.isNaN(importedStartDate.getTime())) {
-      throw new Error("window_start non valido nel JSON.");
+      throw new Error("Invalid window_start in JSON.");
     }
 
     const grouped = {};
@@ -979,7 +979,7 @@
     try {
       payload = JSON.parse(text);
     } catch {
-      window.alert("Il file selezionato non è un JSON valido.");
+      window.alert("The selected file is not valid JSON.");
       return;
     }
 
@@ -987,7 +987,7 @@
       importPlanFromTimetablePayload(payload);
     } catch (err) {
       console.error(err);
-      window.alert(err?.message || "Impossibile caricare il planner da questo file.");
+      window.alert(err?.message || "Unable to load planner from this file.");
     }
   }
 
@@ -1126,7 +1126,7 @@
 
   if (!startDate) startDate = getStartOfWeekMonday(todayStart());
 
-  // importa eventuale draft proveniente dal Discovery
+  // import any draft coming from Discovery
   consumePlannerDraftFromSession();
 
   rebuildEverything();

@@ -1000,7 +1000,7 @@ details.planner-advanced .grid-2{
 .loading-screen{
   position: fixed;
   inset: 0;
-  background: #FDF4F3; /* identico al background della GIF */
+  background: #FDF4F3;
   display: flex;
   align-items: center;
   justify-content: center;
