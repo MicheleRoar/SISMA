@@ -190,7 +190,9 @@
   async function spotifyLogin() {
     const codeVerifier = randomString(64);
     const codeChallenge = base64urlEncode(await sha256(codeVerifier));
-    sessionStorage.setItem("spotify_code_verifier", codeVerifier);
+
+    localStorage.setItem("spotify_code_verifier", codeVerifier);
+    sessionStorage.setItem("spotify_login_in_progress", "1");
 
     const params = new URLSearchParams({
       response_type: "code",
@@ -212,8 +214,8 @@
     if (error) throw new Error(`Spotify auth error: ${error}`);
     if (!code) return;
 
-    const codeVerifier = sessionStorage.getItem("spotify_code_verifier");
-    if (!codeVerifier) throw new Error("Missing PKCE code_verifier (session). Retry Connect Spotify.");
+    const codeVerifier = localStorage.getItem("spotify_code_verifier");
+    if (!codeVerifier) throw new Error("Missing PKCE code_verifier. Retry Connect Spotify.");
 
     const body = new URLSearchParams({
       client_id: CLIENT_ID,
@@ -238,7 +240,9 @@
     setToken(data.access_token, data.expires_in);
 
     const returnUrl = sessionStorage.getItem("sisma_return_url") || "/";
-    sessionStorage.removeItem("spotify_code_verifier");
+
+    localStorage.removeItem("spotify_code_verifier");
+    sessionStorage.removeItem("spotify_login_in_progress");
     sessionStorage.removeItem("sisma_return_url");
 
     window.location.href = returnUrl;
@@ -478,8 +482,13 @@
     const plannerBtn = document.getElementById("btnCommitSpotify");
 
     if (connectBtn) {
-      connectBtn.addEventListener("click", async () => {
+      connectBtn.addEventListener("click", async (e) => {
         try {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (connectBtn.disabled) return;
+
           if (getToken()) {
             updateSpotifyStatusUI();
             return;
@@ -491,8 +500,11 @@
             saveSelectionState();
           }
 
+          connectBtn.disabled = true;
           await spotifyLogin();
         } catch (e) {
+          connectBtn.disabled = false;
+          sessionStorage.removeItem("spotify_login_in_progress");
           msg(`${e?.message || String(e)}`);
         }
       });
