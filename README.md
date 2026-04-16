@@ -1,4 +1,4 @@
-# 🎧 SISMA — Shaping Musical Experience Over Time
+# 🎧 SISMA - Shaping Musical Experience Over Time
 
 SISMA is a system for **designing and controlling how music is perceived over time**.
 
@@ -44,6 +44,18 @@ by balancing:
 
 ---
 
+## 🧠 Scientific Perspective
+
+From a research perspective, SISMA acts as a **computational framework** for studying:
+
+- the relationship between **musical structure and perception**
+- **temporal expectation** in sequential stimuli
+- how feature dynamics influence **collective behavior in naturalistic settings**
+
+The system enables the analysis of how structured variations in musical features (e.g., tempo, energy, novelty) correlate with **real-world behavioral signals**, such as transactional data.
+
+---
+
 ## 🧠 System Overview
 
 SISMA is composed of two complementary modules:
@@ -71,7 +83,8 @@ The Discovery module generates playlists by navigating a **multi-dimensional fea
 ### ⚙️ Inputs
 - audio features (energy, BPM, valence, danceability)  
 - artist inclusion / exclusion  
-- genre inclusion / exclusion  
+- genre inclusion / exclusion 
+- geographical filtering
 - keyword filtering  
 - popularity constraints  
 - optional regional filtering  
@@ -124,19 +137,35 @@ The Planner transforms playlists into **time-dependent musical programs**.
 
 ---
 
-# 🍽️ Example Applications
+## 📈 Behavioral Modeling and Empirical Validation
 
-- 🍽️ **Restaurants** → slower, immersive experience  
-- 🛒 **Retail** → faster, engaging flow  
-- ☕ **Cafés** → balanced atmosphere  
+SISMA extends beyond playlist generation by integrating **real-world behavioral data**.
 
----
+In particular, we link:
 
-# 🧠 Why this matters
+- structured playlist features (e.g., tempo dynamics, energy variation, novelty)  
+- temporal scheduling of music  
+- transactional signals (e.g., point-of-sale data)
 
-SISMA reframes playlist generation as:
+This enables **empirical analysis of how musical structure relates to observed behavior**.
 
-> **a problem of shaping perception through time**
+### 🔬 Analytical Approach
+
+We analyze how variations in musical features correlate with:
+
+- purchasing activity  
+- temporal flow within specific time slots  
+
+The system allows exploration of questions such as:
+
+- Do smoother tempo trajectories correlate with longer engagement?  
+- Does higher energy variability influence purchasing intensity?  
+
+### 🧠 Research Perspective
+
+Rather than treating music as background, SISMA models it as:
+
+> **a structured, time-dependent stimulus influencing collective behavior**
 
 ---
 
