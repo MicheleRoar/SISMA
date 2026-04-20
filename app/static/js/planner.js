@@ -18,7 +18,7 @@
   const DEFAULT_MAX_PER_ARTIST = 2;
   const DEFAULT_COOLDOWN_DAYS = 2;
 
-  const WEEKDAY_IT = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
+  const WEEKDAY_IT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   // DOM
   const daysHead = document.getElementById("daysHead");
@@ -40,7 +40,9 @@
   const slotMood   = document.getElementById("slotMood");
   const slotDance  = document.getElementById("slotDance");
   const slotBpm    = document.getElementById("slotBpm");
-  const slotGenres = document.getElementById("slotGenres");
+  
+  const btnSortSlotPlaylist = document.getElementById("btnSortSlotPlaylist");
+  const slotSortIndicator = document.getElementById("slotSortIndicator");
 
   const btnLoadPlan = document.getElementById("btnLoadPlan");
   const fileLoadPlan = document.getElementById("fileLoadPlan");
@@ -48,6 +50,26 @@
   const btnPrevWindow = document.getElementById("btnPrevWindow");
   const btnNextWindow = document.getElementById("btnNextWindow");
   const windowLabel   = document.getElementById("windowLabel");
+
+  const candidatePoolPanel = document.getElementById("candidatePoolPanel");
+  const candidatePoolTitle = document.getElementById("candidatePoolTitle");
+
+  const candidateSearch = document.getElementById("candidateSearch");
+  const candidateSort = document.getElementById("candidateSort");
+  const candidateBpmMin = document.getElementById("candidateBpmMin");
+  const candidateBpmMax = document.getElementById("candidateBpmMax");
+  const candidateEnergyMin = document.getElementById("candidateEnergyMin");
+  const candidateEnergyMax = document.getElementById("candidateEnergyMax");
+  const candidateMoodMin = document.getElementById("candidateMoodMin");
+  const candidateMoodMax = document.getElementById("candidateMoodMax");
+  const candidateDanceMin = document.getElementById("candidateDanceMin");
+  const candidateDanceMax = document.getElementById("candidateDanceMax");
+
+  const candidateResultsBody = document.getElementById("candidateResultsBody");
+  const candidateResultsCount = document.getElementById("candidateResultsCount");
+
+  const btnResetCandidateFilters = document.getElementById("btnResetCandidateFilters");
+  const btnHideUsedTracks = document.getElementById("btnHideUsedTracks");
 
   const btnDownloadTimetable = document.getElementById("btnDownloadTimetable");
 
@@ -59,6 +81,10 @@
   let gridState = [];   // [rows][COLS] -> slotId|null
   let slots = {};       // slotId -> slot
   let selected = { slotId: null, dayISO: null };
+  let slotPlaylistSortMode = "bpm_asc"; // bpm_asc | bpm_desc | random
+  window.isSlotEditMode = false;
+  let candidateRows = [];
+  let hideUsedCandidates = false;
 
   // layers
   let cellsLayer = null;  // .p-cells
@@ -581,10 +607,20 @@
       .filter(Number.isFinite);
 
     const genreCount = {};
+
     items.forEach(x => {
-      const g = safeText(x.genre ?? x.track_genre, "");
-      if (!g) return;
-      genreCount[g] = (genreCount[g] || 0) + 1;
+      const raw = safeText(x.genre ?? x.track_genre, "");
+      if (!raw) return;
+
+      const genres = raw
+        .split(",")
+        .map(g => g.trim())
+        .filter(Boolean);
+
+      genres.forEach(g => {
+        const key = g.toLowerCase();
+        genreCount[key] = (genreCount[key] || 0) + 1;
+      });
     });
 
     const topGenres = Object.entries(genreCount)
@@ -602,6 +638,355 @@
     };
   }
 
+  function getTrackIdsForSelectedDay(slot, dayISO) {
+    const playlist = ensureTrackEnabledFlags(slot, dayISO);
+    return playlist
+      .map(t => safeText(t.track_id, ""))
+      .filter(Boolean);
+  }
+
+  function getAllUsedTrackIds() {
+    const used = new Set();
+
+    Object.values(slots).forEach((slot) => {
+      const byDay = slot?.playlistsByDay || {};
+      Object.values(byDay).forEach((playlist) => {
+        (playlist || []).forEach((t) => {
+          const id = safeText(t.track_id, "");
+          if (id) used.add(id);
+        });
+      });
+    });
+
+    return used;
+  }  
+
+async function loadCandidatesForSelectedSlot() {
+  const slotId = selected?.slotId || null;
+  const dayISO = selected?.dayISO || null;
+
+  if (!slotId || !dayISO || !slots[slotId]) {
+    candidateRows = [];
+    renderCandidateResults();
+    return;
+  }
+
+  const slot = slots[slotId];
+  const discovery = slot.discovery || {};
+  const excludeTrackIds = Array.from(getAllUsedTrackIds());
+
+  if (candidatePoolTitle) {
+    candidatePoolTitle.textContent = `Candidates for ${safeText(slot.name, "Slot")} • ${dayISO}`;
+  }
+
+  try {
+    const resp = await fetch("/planner/api/candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        day_iso: dayISO,
+        discovery,
+        k: 100,
+        exclude_track_ids: excludeTrackIds
+      })
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok || !data?.ok) {
+      throw new Error(data?.error || `HTTP ${resp.status}`);
+    }
+
+    candidateRows = Array.isArray(data.tracks) ? data.tracks : [];
+    setDebug(data.report || {});
+    renderCandidateResults();
+
+  } catch (err) {
+    console.error("Candidates load failed:", err);
+    candidateRows = [];
+    renderCandidateResults(`Unable to load candidates: ${err.message}`);
+  }
+}
+
+  function renderCandidateResults(errorMsg = "") {
+    if (!candidateResultsBody || !candidateResultsCount) return;
+
+    const slotId = selected?.slotId || null;
+    const dayISO = selected?.dayISO || null;
+    const slot = slotId ? slots[slotId] : null;
+
+    if (!slotId || !dayISO || !slot) {
+      candidateResultsBody.innerHTML = `
+        <tr class="candidate-empty-row">
+          <td colspan="9">No slot selected yet.</td>
+        </tr>
+      `;
+      candidateResultsCount.textContent = "0 candidates";
+      return;
+    }
+
+    if (errorMsg) {
+      candidateResultsBody.innerHTML = `
+        <tr class="candidate-empty-row">
+          <td colspan="9">${escapeHtml(errorMsg)}</td>
+        </tr>
+      `;
+      candidateResultsCount.textContent = "0 candidates";
+      return;
+    }
+
+    const q = safeText(candidateSearch?.value, "").toLowerCase();
+    const sortBy = safeText(candidateSort?.value, "match");
+
+    const bpmMin = candidateBpmMin?.value !== "" ? Number(candidateBpmMin.value) : null;
+    const bpmMax = candidateBpmMax?.value !== "" ? Number(candidateBpmMax.value) : null;
+
+    const energyMin = candidateEnergyMin?.value !== "" ? Number(candidateEnergyMin.value) : null;
+    const energyMax = candidateEnergyMax?.value !== "" ? Number(candidateEnergyMax.value) : null;
+
+    const moodMin = candidateMoodMin?.value !== "" ? Number(candidateMoodMin.value) : null;
+    const moodMax = candidateMoodMax?.value !== "" ? Number(candidateMoodMax.value) : null;
+
+    const danceMin = candidateDanceMin?.value !== "" ? Number(candidateDanceMin.value) : null;
+    const danceMax = candidateDanceMax?.value !== "" ? Number(candidateDanceMax.value) : null;
+
+    const usedIds = getAllUsedTrackIds();
+    const dayTrackIds = new Set(getTrackIdsForSelectedDay(slot, dayISO));
+
+    let rows = [...candidateRows];
+
+    if (hideUsedCandidates) {
+      rows = rows.filter((r) => {
+        const id = safeText(r.track_id, "");
+        return !usedIds.has(id);
+      });
+    }
+
+    rows = rows.filter((r) => {
+      const textBlob = [
+        safeText(r.title, ""),
+        safeText(r.artist, ""),
+        safeText(r.genre, "")
+      ].join(" ").toLowerCase();
+
+      if (q && !textBlob.includes(q)) return false;
+
+      const bpm = Number(r.bpm);
+      const energy = Number(r.energy);
+      const mood = Number(r.valence ?? r.mood);
+      const dance = Number(r.danceability);
+
+      if (bpmMin != null && (!Number.isFinite(bpm) || bpm < bpmMin)) return false;
+      if (bpmMax != null && (!Number.isFinite(bpm) || bpm > bpmMax)) return false;
+
+      if (energyMin != null && (!Number.isFinite(energy) || energy < energyMin)) return false;
+      if (energyMax != null && (!Number.isFinite(energy) || energy > energyMax)) return false;
+
+      if (moodMin != null && (!Number.isFinite(mood) || mood < moodMin)) return false;
+      if (moodMax != null && (!Number.isFinite(mood) || mood > moodMax)) return false;
+
+      if (danceMin != null && (!Number.isFinite(dance) || dance < danceMin)) return false;
+      if (danceMax != null && (!Number.isFinite(dance) || dance > danceMax)) return false;
+
+      return true;
+    });
+
+    rows.sort((a, b) => {
+      const av = Number(a[sortBy] ?? (sortBy === "mood" ? a.valence : null));
+      const bv = Number(b[sortBy] ?? (sortBy === "mood" ? b.valence : null));
+
+      if (sortBy === "match" || sortBy === "popularity") {
+        return (Number.isFinite(bv) ? bv : -Infinity) - (Number.isFinite(av) ? av : -Infinity);
+      }
+
+      return (Number.isFinite(av) ? av : Infinity) - (Number.isFinite(bv) ? bv : Infinity);
+    });
+
+    if (!rows.length) {
+      candidateResultsBody.innerHTML = `
+        <tr class="candidate-empty-row">
+          <td colspan="9">No candidates match the current filters.</td>
+        </tr>
+      `;
+      candidateResultsCount.textContent = "0 candidates";
+      return;
+    }
+
+    candidateResultsBody.innerHTML = rows.map((row) => {
+      const id = safeText(row.track_id, "");
+      const alreadyInDay = dayTrackIds.has(id);
+
+      return `
+        <tr>
+          <td>${escapeHtml(safeText(row.title, "—"))}</td>
+          <td>${escapeHtml(safeText(row.artist, "—"))}</td>
+          <td>${Number.isFinite(Number(row.bpm)) ? Math.round(Number(row.bpm)) : "—"}</td>
+          <td>${Number.isFinite(Number(row.match)) ? Math.round(Number(row.match)) : "—"}</td>
+          <td>${Number.isFinite(Number(row.energy)) ? Number(row.energy).toFixed(2) : "—"}</td>
+          <td>${Number.isFinite(Number(row.valence ?? row.mood)) ? Number(row.valence ?? row.mood).toFixed(2) : "—"}</td>
+          <td>${Number.isFinite(Number(row.danceability)) ? Number(row.danceability).toFixed(2) : "—"}</td>
+          <td>${escapeHtml(safeText(row.genre, "—"))}</td>
+          <td>
+            ${
+              alreadyInDay
+                ? `<span class="hint">Added</span>`
+                : `<button class="candidate-add-btn" type="button" data-track-id="${escapeHtml(id)}">+ Add</button>`
+            }
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+    candidateResultsCount.textContent = `${rows.length} candidates`;
+
+    candidateResultsBody.querySelectorAll(".candidate-add-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const trackId = safeText(btn.dataset.trackId, "");
+        const picked = candidateRows.find((r) => safeText(r.track_id, "") === trackId);
+        if (!picked) return;
+
+        const playlist = ensureTrackEnabledFlags(slot, dayISO);
+
+        if (!playlist.some((t) => safeText(t.track_id, "") === trackId)) {
+          playlist.push({
+            ...picked,
+            enabled: true
+          });
+
+          candidateRows = candidateRows.filter((r) => safeText(r.track_id, "") !== trackId);
+
+          slot.playlistsByDay[dayISO] = playlist;
+          save();
+          applySelectedSlotToEditor(slot, dayISO);
+          renderSelectedSlotPlaylist();
+
+          if (window.isSlotEditMode) {
+            loadCandidatesForSelectedSlot();
+          }
+
+          renderCandidateResults();
+        }
+      });
+    });
+  }
+
+
+  function getSortedSlotPlaylist(playlist) {
+    const arr = Array.isArray(playlist) ? [...playlist] : [];
+
+    if (slotPlaylistSortMode === "random") {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    const bpmValue = (x) => {
+      const n = Number(x?.bpm);
+      return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+    };
+
+    arr.sort((a, b) => bpmValue(a) - bpmValue(b));
+
+    if (slotPlaylistSortMode === "bpm_desc") {
+      arr.reverse();
+    }
+
+    return arr;
+  }
+
+  function updateSlotSortIndicator() {
+    if (!slotSortIndicator) return;
+
+    if (slotPlaylistSortMode === "bpm_asc") {
+      slotSortIndicator.textContent = "▲";
+      slotSortIndicator.title = "BPM ascending";
+      return;
+    }
+
+    if (slotPlaylistSortMode === "bpm_desc") {
+      slotSortIndicator.textContent = "▼";
+      slotSortIndicator.title = "BPM descending";
+      return;
+    }
+
+    slotSortIndicator.textContent = "•";
+    slotSortIndicator.title = "Random order";
+  }  
+
+
+
+  function renderSelectedSlotPlaylist() {
+    const slotId = selected?.slotId || null;
+    const dayISO = selected?.dayISO || null;
+
+    if (!slotId || !dayISO || !slots[slotId]) {
+      if (slotPlaylistList) {
+        slotPlaylistList.innerHTML = `<div class="hint">—</div>`;
+      }
+      return;
+    }
+
+    const slot = slots[slotId];
+    const playlist = ensureTrackEnabledFlags(slot, dayISO);
+    const sortedPlaylist = getSortedSlotPlaylist(playlist);
+
+    if (!playlist.length) {
+      if (slotPlaylistList) {
+        slotPlaylistList.innerHTML = `<div class="hint">No songs assigned for this day.</div>`;
+      }
+      return;
+    }
+
+    slotPlaylistList.innerHTML = sortedPlaylist.map((x, i) => {
+      const title = safeText(x.title ?? x.track_name ?? x.name, "(untitled)");
+      const artist = safeText(x.artist ?? x.artists, "");
+      const bpm = (x.bpm != null && x.bpm !== "")
+        ? `<span class="muted"> • ${escapeHtml(String(Math.round(Number(x.bpm))))} BPM</span>`
+        : "";
+
+      return `
+        <div class="pl-item">
+          <div class="pl-item-row">
+            <button
+              type="button"
+              class="pl-remove-btn ${window.isSlotEditMode ? "" : "is-hidden"}"
+              data-track-index="${i}"
+              aria-label="Remove track"
+              title="Remove track"
+            >×</button>
+
+            <span class="pl-item-text">
+              ${i + 1}. ${escapeHtml(title)}${artist ? " — " + escapeHtml(artist) : ""}${bpm}
+            </span>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    slotPlaylistList.querySelectorAll(".pl-remove-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+
+        const idx = Number(btn.dataset.trackIndex);
+        if (!Number.isInteger(idx) || !sortedPlaylist[idx]) return;
+
+        const picked = sortedPlaylist[idx];
+        const pickedId = safeText(picked.track_id, "");
+        const originalIdx = playlist.findIndex((t) => safeText(t.track_id, "") === pickedId);
+
+        if (originalIdx < 0) return;
+
+        playlist.splice(originalIdx, 1);
+        slot.playlistsByDay[dayISO] = playlist;
+
+        save();
+        applySelectedSlotToEditor(slot, dayISO);
+        renderSelectedSlotPlaylist();
+      });
+    });
+  }
 
   // ---------------- Click handling ----------------
 
@@ -613,12 +998,14 @@
     if (!slotId) {
       selected = { slotId: null, dayISO: null };
       repaintAll();
-      renderSidebarEmpty("Cella vuota: nessuna playlist in questo orario.");
+      renderSidebarEmpty("Empty cell: no playlist at this time.");
       return;
     }
 
     const slot = slots[slotId];
     if (!slot) {
+      selected = { slotId: null, dayISO: null };
+      repaintAll();
       renderSidebarEmpty("Missing slot (corrupted state).");
       return;
     }
@@ -630,54 +1017,14 @@
     if (slotPeriod) slotPeriod.textContent = safeText(slot.name, "—");
     if (slotTimeInfo) slotTimeInfo.textContent = `${slot.start}–${slot.end}`;
 
-    const playlist = ensureTrackEnabledFlags(slot, dayISO);
+    ensureTrackEnabledFlags(slot, dayISO);
     applySelectedSlotToEditor(slot, dayISO);
+    renderSelectedSlotPlaylist();
 
-    if (!playlist.length) {
-      if (slotPlaylistList) {
-        slotPlaylistList.innerHTML = `<div class="hint">No songs assigned for this day.</div>`;
-      }
-      return;
+    if (window.isSlotEditMode) {
+      loadCandidatesForSelectedSlot();
     }
-
-    if (slotPlaylistList) {
-      slotPlaylistList.innerHTML = playlist.map((x, i) => {
-        const title = safeText(x.title ?? x.track_name ?? x.name, "(untitled)");
-        const artist = safeText(x.artist ?? x.artists, "");
-        const bpm = (x.bpm != null && x.bpm !== "")
-          ? `<span class="muted"> • ${escapeHtml(String(Math.round(Number(x.bpm))))} BPM</span>`
-          : "";
-
-        const checked = x.enabled !== false ? "checked" : "";
-
-        return `
-          <label class="pl-item pl-item-checkable">
-            <input
-              type="checkbox"
-              class="track-toggle"
-              data-track-index="${i}"
-              ${checked}
-            >
-            <span class="pl-item-text">
-              ${i + 1}. ${escapeHtml(title)}${artist ? " — " + escapeHtml(artist) : ""}${bpm}
-            </span>
-          </label>
-        `;
-      }).join("");
-
-      slotPlaylistList.querySelectorAll(".track-toggle").forEach((el) => {
-        el.addEventListener("change", () => {
-          const idx = Number(el.dataset.trackIndex);
-          if (!Number.isInteger(idx) || !playlist[idx]) return;
-
-          playlist[idx].enabled = !!el.checked;
-          slot.playlistsByDay[dayISO] = playlist;
-          save();
-          applySelectedSlotToEditor(slot, dayISO);
-        });
-      });
-    }
-      }
+  }
 
 
   // ---------------- Slot editor events ----------------
@@ -771,7 +1118,7 @@
     const payload = {
       version: "sisma-planner-export-v1",
       generated_at: new Date().toISOString(),
-      window_start: startDate.toISOString().slice(0,10),
+      window_start: fmtLocalISODate(startDate),
       window_days: COLS,
       items
     };
@@ -781,7 +1128,7 @@
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = `sisma_timetable_${startDate.toISOString().slice(0,10)}.json`;
+    a.download = `sisma_timetable_${fmtLocalISODate(startDate)}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1107,6 +1454,67 @@
     return true;
   }
 
+  function initCandidatePoolEditMode() {
+    const btnEdit = document.getElementById("btnEditSlotPlaylist");
+    const panel = document.getElementById("candidatePoolPanel");
+    const title = document.getElementById("candidatePoolTitle");
+    const subtitle = document.getElementById("candidatePoolSubtitle");
+
+    if (!btnEdit || !panel) return;
+
+    btnEdit.addEventListener("click", () => {
+      const isHidden = panel.classList.contains("is-hidden");
+
+      if (isHidden) {
+        panel.classList.remove("is-hidden");
+        window.isSlotEditMode = true;
+
+        if (title) {
+          title.textContent = "Select a slot to inspect candidates";
+        }
+
+        if (subtitle) {
+          subtitle.textContent = "Click a slot in the calendar to inspect candidates and refine the playlist manually.";
+        }
+
+        btnEdit.textContent = "Close";
+      } else {
+        panel.classList.add("is-hidden");
+        window.isSlotEditMode = false;
+        btnEdit.textContent = "Edit";
+      }
+
+      renderSelectedSlotPlaylist();
+
+      if (window.isSlotEditMode) {
+        loadCandidatesForSelectedSlot();
+      } else {
+        candidateRows = [];
+        renderCandidateResults();
+      }
+
+    });
+  }
+
+  function initSlotPlaylistSort() {
+    if (!btnSortSlotPlaylist) return;
+
+    updateSlotSortIndicator();
+
+    btnSortSlotPlaylist.addEventListener("click", () => {
+      if (slotPlaylistSortMode === "bpm_asc") {
+        slotPlaylistSortMode = "bpm_desc";
+      } else if (slotPlaylistSortMode === "bpm_desc") {
+        slotPlaylistSortMode = "random";
+      } else {
+        slotPlaylistSortMode = "bpm_asc";
+      }
+
+      updateSlotSortIndicator();
+      renderSelectedSlotPlaylist();
+    });
+  }
+
 
   // ---------------- Scroll sync (header) ----------------
   function bindScrollSync() {
@@ -1131,13 +1539,13 @@
 
   rebuildEverything();
   bindScrollSync();
+  initCandidatePoolEditMode();
+  initSlotPlaylistSort();
 
   // events
-
   if (slotColorEdit) slotColorEdit.addEventListener("input", onSlotEditorChange);
 
-
-    if (btnLoadPlan && fileLoadPlan) {
+  if (btnLoadPlan && fileLoadPlan) {
     btnLoadPlan.addEventListener("click", () => fileLoadPlan.click());
 
     fileLoadPlan.addEventListener("change", async (e) => {
@@ -1148,10 +1556,58 @@
       e.target.value = "";
     });
   }
+
   if (btnDownloadTimetable) btnDownloadTimetable.addEventListener("click", exportTimetableJSON);
-  //if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
+  // if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
 
   if (btnClearPlan) btnClearPlan.addEventListener("click", clearAll);
   if (btnPrevWindow) btnPrevWindow.addEventListener("click", () => shiftWindow(-14));
   if (btnNextWindow) btnNextWindow.addEventListener("click", () => shiftWindow(+14));
+
+  [
+    candidateSearch,
+    candidateSort,
+    candidateBpmMin,
+    candidateBpmMax,
+    candidateEnergyMin,
+    candidateEnergyMax,
+    candidateMoodMin,
+    candidateMoodMax,
+    candidateDanceMin,
+    candidateDanceMax
+  ].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("input", () => renderCandidateResults());
+    el.addEventListener("change", () => renderCandidateResults());
+  });
+
+  if (btnResetCandidateFilters) {
+    btnResetCandidateFilters.addEventListener("click", () => {
+      if (candidateSearch) candidateSearch.value = "";
+      if (candidateSort) candidateSort.value = "match";
+
+      if (candidateBpmMin) candidateBpmMin.value = "";
+      if (candidateBpmMax) candidateBpmMax.value = "";
+
+      if (candidateEnergyMin) candidateEnergyMin.value = "";
+      if (candidateEnergyMax) candidateEnergyMax.value = "";
+
+      if (candidateMoodMin) candidateMoodMin.value = "";
+      if (candidateMoodMax) candidateMoodMax.value = "";
+
+      if (candidateDanceMin) candidateDanceMin.value = "";
+      if (candidateDanceMax) candidateDanceMax.value = "";
+
+      renderCandidateResults();
+    });
+  }
+
+  if (btnHideUsedTracks) {
+    btnHideUsedTracks.addEventListener("click", () => {
+      hideUsedCandidates = !hideUsedCandidates;
+      btnHideUsedTracks.textContent = hideUsedCandidates ? "Show used" : "Hide used";
+      renderCandidateResults();
+    });
+  }
 })();
+

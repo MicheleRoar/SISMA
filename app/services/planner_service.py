@@ -191,29 +191,62 @@ def _df_to_tracks_payload(df: pd.DataFrame) -> List[Dict[str, Any]]:
     return out
 
 def _extract_genres_from_row(row: pd.Series) -> List[str]:
+    def _split_genres(value: Any) -> List[str]:
+        """
+        Split robustly on both:
+        - "|"  (internal genres_str separator)
+        - ","  (display / compact genre separator)
+
+        Example:
+          "canzone d'autore, classic italian pop"
+          -> ["canzone d'autore", "classic italian pop"]
+        """
+        s = str(value or "").strip()
+        if not s:
+            return []
+
+        out_parts: List[str] = []
+
+        # first split on pipe
+        for chunk in s.split("|"):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+
+            # then split each chunk on comma
+            for sub in chunk.split(","):
+                g = sub.strip()
+                if g:
+                    out_parts.append(g)
+
+        return out_parts
+
     out: List[str] = []
 
     gl = row.get("genres_list", None)
     if isinstance(gl, list):
-        out.extend([str(x).strip() for x in gl if str(x).strip()])
+        for x in gl:
+            out.extend(_split_genres(x))
 
     if not out:
         gs = str(row.get("genres_str", "") or "").strip()
         if gs:
-            out.extend([p.strip() for p in gs.split("|") if p.strip()])
+            out.extend(_split_genres(gs))
 
     if not out:
         tg = str(row.get("track_genre", "") or "").strip()
         if tg:
-            out.extend([p.strip() for p in tg.split(",") if p.strip()])
+            out.extend(_split_genres(tg))
 
     seen = set()
-    cleaned = []
+    cleaned: List[str] = []
     for g in out:
         g2 = g.strip()
-        if g2 and g2.lower() not in seen:
-            seen.add(g2.lower())
+        g2l = g2.lower()
+        if g2 and g2l not in seen:
+            seen.add(g2l)
             cleaned.append(g2)
+
     return cleaned
 
 
@@ -526,6 +559,7 @@ class PlannerService:
             include_genres=req.include_genres,
             exclude_artists=req.exclude_artists,
             exclude_genres=req.exclude_genres,
+            popularity_tier=req.popularity_tier,
         )
 
         target_pool_size = max(int(total_needed) * 4, req.pool_size, 2000)
@@ -612,6 +646,7 @@ class PlannerService:
             include_genres=wide_genres,
             exclude_artists=req.exclude_artists,
             exclude_genres=req.exclude_genres,
+            popularity_tier=req.popularity_tier,
         )
 
         wide_pool = self.rec.build_pool(
@@ -872,6 +907,81 @@ class PlannerService:
             out[day_iso] = _df_to_tracks_payload(day_df)
 
         return out
+
+        
+
+    def get_candidates_for_discovery_payload(
+        self,
+        *,
+        discovery_payload: Dict[str, Any],
+        day_iso: str,
+        k: int = 100,
+        exclude_track_ids_global: Optional[Set[str]] = None,
+        seed: int = 42,
+        slot_id: str = "slot",
+    ) -> Dict[str, Any]:
+        """
+        Returns a candidate list for one selected slot/day, without distributing
+        tracks across multiple days.
+
+        Output:
+          {
+            "tracks": [...],
+            "report": {...}
+          }
+        """
+        exclude_track_ids_global = exclude_track_ids_global or set()
+
+        req = self._parse_discovery_payload(discovery_payload)
+
+        total_needed = int(k)
+        rs = _stable_int_seed(str(seed), slot_id, str(day_iso), "candidates")
+
+        master_pool = self._build_master_pool(
+            req,
+            total_needed=total_needed,
+            random_state=rs,
+            exclude_track_ids=exclude_track_ids_global,
+        )
+
+        if master_pool is None or master_pool.empty:
+            return {
+                "tracks": [],
+                "report": {
+                    "day": str(day_iso),
+                    "slot_id": str(slot_id),
+                    "k": int(k),
+                    "candidate_pool_size": 0,
+                    "reason": "empty_master_pool",
+                },
+            }
+
+        candidate_df = master_pool.head(int(k)).copy()
+        tracks = _df_to_tracks_payload(candidate_df)
+
+        report: Dict[str, Any] = {
+            "day": str(day_iso),
+            "slot_id": str(slot_id),
+            "k": int(k),
+            "candidate_pool_size": int(len(candidate_df)),
+            "master_pool_size": int(len(master_pool)),
+            "strict_semantics": bool(req.strict_semantics),
+            "lock_tempo": bool(req.lock_tempo),
+            "include_mode": req.include_mode,
+            "popularity_tier": req.popularity_tier,
+            "include_artists": req.include_artists,
+            "include_genres": req.include_genres,
+            "selected_regions": req.selected_regions,
+            "exclude_artists": req.exclude_artists,
+            "exclude_genres": req.exclude_genres,
+            "exclude_keywords": req.exclude_keywords,
+            "ranges": req.ranges,
+        }
+
+        return {
+            "tracks": tracks,
+            "report": report,
+        }
 
     # ---------- public generation ----------
 

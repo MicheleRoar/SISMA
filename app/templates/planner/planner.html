@@ -12,19 +12,21 @@
 <body>
   <div class="wrap planner-wrap">
 
-    <header class="planner-header">
-      <div class="brand">
-        <div class="logo">SISMA</div>
-        <div class="subtitle">Planner</div>
-      </div>
+    <header class="planner-header planner-header-full">
+      <div class="planner-header-inner">
+        <div class="brand">
+          <div class="logo">SISMA</div>
+          <div class="subtitle">Planner</div>
+        </div>
 
-      <nav class="tabs">
-        <a class="tab" href="{{ url_for('discovery.index') }}">Discovery</a>
-        <a class="tab active" href="{{ url_for('planner.index') }}">Planner</a>
-      </nav>
+        <nav class="tabs">
+          <a class="tab" href="{{ url_for('discovery.index') }}">Discovery</a>
+          <a class="tab active" href="{{ url_for('planner.index') }}">Planner</a>
+        </nav>
+      </div>
     </header>
 
-    <main class="planner-layout">
+    <main class="planner-workspace">
 
       <!-- SIDEBAR -->
       <aside class="planner-panel card">
@@ -42,7 +44,11 @@
           </div>
         </div>
 
-        <section class="panel-section">
+
+      <div class="planner-panel-scroll">
+
+
+                <section class="panel-section">
 
           <div class="section-title">Slot</div>
 
@@ -89,20 +95,30 @@
 
           </div>
 
-  <div class="slot-genres">
+          <div class="slot-genres">
 
-    <div class="section-title small">Top genres</div>
+            <div class="section-title small">Top genres</div>
 
-    <ul id="slotGenres">
-      <li class="hint">—</li>
-    </ul>
+            <ul id="slotGenres">
+              <li class="hint">—</li>
+            </ul>
 
-  </div>
+          </div>
 
-</section>
-
+        </section>
+        
         <section class="panel-section">
-          <div class="section-title">Playlist of the day</div>
+          <div class="section-head-inline">
+            <div class="section-title">Playlist of the day</div>
+
+            <div class="playlist-toolbar">
+              <button id="btnSortSlotPlaylist" class="btn secondary btn-xs" type="button">
+                Sort <span id="slotSortIndicator" class="sort-indicator">▲</span>
+              </button>
+              <button id="btnEditSlotPlaylist" class="btn secondary btn-xs" type="button">Edit</button>
+            </div>
+          </div>
+
           <div id="slotPlaylistList" class="playlist-list">
             <div class="hint">—</div>
           </div>
@@ -130,13 +146,9 @@
 
           <p id="spotify_msg" class="message" style="display:none;"></p>
 
-          <div class="hint tiny">Spotify = export playlist/week structure. JSON = export completo.</div>
         </section>
 
-        <details class="mini">
-          <summary>Report / Debug</summary>
-          <pre id="debugBox" class="debug">—</pre>
-        </details>
+      </div>  
 
       </aside>
 
@@ -161,6 +173,102 @@
           </div>
         </div>
 
+      </section>
+
+
+      <section id="candidatePoolPanel" class="candidate-pool-panel card is-hidden">
+        <div class="candidate-pool-head">
+          <div class="candidate-pool-head-left">
+            <h3 id="candidatePoolTitle">Select a slot to inspect candidates</h3>
+          </div>
+
+          <div class="candidate-pool-head-actions">
+            <button id="btnResetCandidateFilters" class="btn secondary" type="button">Reset filters</button>
+            <button id="btnHideUsedTracks" class="btn secondary" type="button">Hide used</button>
+          </div>
+        </div>
+
+        <div class="candidate-pool-body">
+          <aside class="candidate-filters">
+            <div class="candidate-filter-group">
+              <label for="candidateSearch">Search</label>
+              <input id="candidateSearch" type="text" placeholder="Title, artist, genre..." />
+            </div>
+
+            <div class="candidate-filter-group">
+              <label for="candidateSort">Sort by</label>
+              <select id="candidateSort">
+                <option value="match">Best match</option>
+                <option value="bpm">BPM</option>
+                <option value="energy">Energy</option>
+                <option value="mood">Mood</option>
+                <option value="danceability">Danceability</option>
+                <option value="popularity">Popularity</option>
+              </select>
+            </div>
+
+            <div class="candidate-filter-group candidate-range-group">
+              <label>BPM</label>
+              <div class="candidate-range-row">
+                <input id="candidateBpmMin" type="number" placeholder="min" />
+                <input id="candidateBpmMax" type="number" placeholder="max" />
+              </div>
+            </div>
+
+            <div class="candidate-filter-group candidate-range-group">
+              <label>Energy</label>
+              <div class="candidate-range-row">
+                <input id="candidateEnergyMin" type="number" min="0" max="1" step="0.01" placeholder="min" />
+                <input id="candidateEnergyMax" type="number" min="0" max="1" step="0.01" placeholder="max" />
+              </div>
+            </div>
+
+            <div class="candidate-filter-group candidate-range-group">
+              <label>Mood</label>
+              <div class="candidate-range-row">
+                <input id="candidateMoodMin" type="number" min="0" max="1" step="0.01" placeholder="min" />
+                <input id="candidateMoodMax" type="number" min="0" max="1" step="0.01" placeholder="max" />
+              </div>
+            </div>
+
+            <div class="candidate-filter-group candidate-range-group">
+              <label>Danceability</label>
+              <div class="candidate-range-row">
+                <input id="candidateDanceMin" type="number" min="0" max="1" step="0.01" placeholder="min" />
+                <input id="candidateDanceMax" type="number" min="0" max="1" step="0.01" placeholder="max" />
+              </div>
+            </div>
+          </aside>
+
+          <div class="candidate-results">
+            <div class="candidate-results-toolbar">
+              <div id="candidateResultsCount" class="candidate-results-count">0 candidates</div>
+            </div>
+
+            <div class="candidate-results-table-wrap">
+              <table class="candidate-results-table">
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Artist</th>
+                    <th>BPM</th>
+                    <th>Match</th>
+                    <th>Energy</th>
+                    <th>Mood</th>
+                    <th>Dance</th>
+                    <th>Genre</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="candidateResultsBody">
+                  <tr class="candidate-empty-row">
+                    <td colspan="9">No slot selected yet.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </section>
 
     </main>

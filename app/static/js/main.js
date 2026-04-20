@@ -1868,20 +1868,44 @@ function hideLoader() {
   const form = document.getElementById("playlist_form");
   if (!form) return;
 
-  form.addEventListener("submit", () => {
+  function buildTargetUrl() {
+    const params = new URLSearchParams(new FormData(form));
+
+    const rawAction = form.getAttribute("action") || window.location.pathname;
+    const [basePath, hashPart] = rawAction.split("#");
+    const hash = hashPart ? `#${hashPart}` : "";
+
+    return `${basePath}?${params.toString()}${hash}`;
+  }
+
+  form.addEventListener("submit", (e) => {
     sessionStorage.removeItem("sisma_selected_tracks");
     showLoader();
 
     const btn = form.querySelector('button[type="submit"]');
     if (btn) btn.disabled = true;
+
+    const targetUrl = buildTargetUrl();
+    const currentUrl = window.location.pathname + window.location.search + window.location.hash;
+
+    // stesso URL finale = alcuni browser non rifanno bene il lifecycle della pagina
+    if (targetUrl === currentUrl) {
+      e.preventDefault();
+
+      const bust = `_ts=${Date.now()}`;
+      const [urlNoHash, hash = ""] = targetUrl.split("#");
+      const sep = urlNoHash.includes("?") ? "&" : "?";
+
+      window.location.assign(`${urlNoHash}${sep}${bust}${hash ? "#" + hash : ""}`);
+    }
   });
 
-  window.addEventListener("load", () => {
-    hideLoader();
-  });
+  window.addEventListener("load", hideLoader);
+  window.addEventListener("pageshow", hideLoader);
 
-  window.addEventListener("pageshow", () => {
-    hideLoader();
+  // fallback extra: se torni sulla pagina già renderizzata da cache/back-forward
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") hideLoader();
   });
 })();
 

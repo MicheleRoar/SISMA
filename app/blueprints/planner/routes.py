@@ -87,6 +87,75 @@ def api_generate():
         return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
 
 
+@bp.post("/api/candidates")
+def api_candidates():
+    """
+    Returns real candidates for one selected slot/day.
+
+    POST {
+      slot_id?: string,
+      day_iso: "YYYY-MM-DD",
+      discovery: {...},
+      k?: int,
+      seed?: int,
+      exclude_track_ids?: [track_id...]
+    }
+
+    Returns:
+      { ok:true, tracks:[...], report:{...} }
+    """
+    try:
+        payload = request.get_json(force=True) or {}
+
+        discovery = payload.get("discovery") or None
+        if discovery is None or not isinstance(discovery, dict):
+            return jsonify({"ok": False, "error": "discovery deve essere un oggetto"}), 400
+
+        day_iso = str(payload.get("day_iso") or "").strip()
+        if not day_iso:
+            return jsonify({"ok": False, "error": "day_iso mancante"}), 400
+
+        k = int(payload.get("k", 100) or 100)
+
+        seed = payload.get("seed", 42)
+        try:
+            seed = int(seed)
+        except Exception:
+            seed = 42
+
+        slot_id = str(payload.get("slot_id") or "slot").strip() or "slot"
+
+        exclude_track_ids = payload.get("exclude_track_ids") or []
+        if not isinstance(exclude_track_ids, list):
+            exclude_track_ids = []
+
+        exclude_track_ids_global = {
+            str(x).strip()
+            for x in exclude_track_ids
+            if str(x).strip()
+        }
+
+        svc = _svc()
+
+        res = svc.get_candidates_for_discovery_payload(
+            discovery_payload=discovery,
+            day_iso=day_iso,
+            k=k,
+            exclude_track_ids_global=exclude_track_ids_global,
+            seed=seed,
+            slot_id=slot_id,
+        )
+
+        return jsonify({
+            "ok": True,
+            "tracks": res.get("tracks", []),
+            "report": res.get("report", {}),
+        })
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"{type(e).__name__}: {e}"}), 500
+
+
 # -------------------------------------------------------------------
 # Core: batch generation for multiple day occurrences (Planner v2)
 # -------------------------------------------------------------------

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -491,6 +492,21 @@ class PlaylistRecommender:
             top_local = self._topk_indices(dloc, pool_size)
             top_global = local_idx[top_local]
 
+            # NEW: probabilistic sampling
+            scores = dloc[top_local]
+            weights = np.exp(-scores)
+            weights = weights / weights.sum()
+
+            rng = np.random.default_rng(random_state)
+            sampled_idx = rng.choice(
+                np.arange(len(top_global)),
+                size=min(len(top_global), need * 3),
+                replace=False,
+                p=weights
+            )
+
+            top_global = top_global[sampled_idx]
+
             return self._apply_constraints(
                 top_global,
                 k=int(need),
@@ -891,6 +907,81 @@ class PlaylistRecommender:
         return [str(x).strip().upper() for x in (regions or []) if str(x).strip()]
 
 
+    def _slice_ranked_region_genres(
+        self,
+        ranked: List[tuple],
+        *,
+        popularity_tier: str = "",
+        default_top_n: int = 50,
+    ) -> List[str]:
+        """
+        Select a subset of ranked regional genres according to popularity tier.
+
+        ranked: list of (genre, score/count), already sorted desc.
+        """
+        popularity_tier = (popularity_tier or "").strip().lower()
+        ranked_genres = [g for g, _ in (ranked or []) if str(g).strip()]
+        n = len(ranked_genres)
+
+        if n == 0:
+            return []
+
+        if not popularity_tier:
+            return ranked_genres[: int(default_top_n)]
+
+        q1 = max(1, int(round(n * 0.25)))
+        q2 = max(q1 + 1, int(round(n * 0.50)))
+        q3 = max(q2 + 1, int(round(n * 0.75)))
+
+        if popularity_tier == "mainstream":
+            # top quartile, capped
+            return ranked_genres[: min(q1, 40)]
+
+        if popularity_tier == "balanced":
+            # stable default
+            return ranked_genres[: min(n, int(default_top_n))]
+
+        if popularity_tier == "niche":
+            # middle band
+            out = ranked_genres[q1:q3]
+            return out[:50]
+
+        if popularity_tier in {"deep", "discovery"}:
+            # lower-middle + tail, not just ultra-obscure bottom
+            out = ranked_genres[q2:]
+            return out[:50]
+
+        return ranked_genres[: int(default_top_n)]
+
+
+    def _get_region_genres_for_universe(
+        self,
+        *,
+        iso: str,
+        popularity_tier: str = "",
+        default_top_n: int = 50,
+    ) -> List[str]:
+        """
+        Regional genre policy for universe building.
+        """
+        payload = get_region_payload(iso=iso, top_n=120)
+        if not payload.get("ok"):
+            return []
+
+        ranked = payload.get("expanded_genres_ranked", []) or []
+        chosen = self._slice_ranked_region_genres(
+            ranked,
+            popularity_tier=popularity_tier,
+            default_top_n=default_top_n,
+        )
+
+        # fallback on payload["genres"] if ranked is empty
+        if not chosen:
+            fallback = payload.get("genres", []) or []
+            return [g for g in fallback[:default_top_n] if str(g).strip()]
+
+        return chosen
+
 
     from .region_genres import get_region_payload
     def _get_region_genres_ranked(
@@ -927,24 +1018,53 @@ class PlaylistRecommender:
         region_genres: Optional[List[str]] = None,
         manual_genres: Optional[List[str]] = None,
         max_genres: int = 10,
+        per_region: Optional[Dict[str, List[str]]] = None,
     ) -> List[str]:
         region_genres = [str(x).strip() for x in (region_genres or []) if str(x).strip()]
         manual_genres = [str(x).strip() for x in (manual_genres or []) if str(x).strip()]
 
-        if region_genres:
-            if manual_genres:
-                manual_in_region = []
-                region_set = set(region_genres)
-                for g in manual_genres:
-                    if g in region_set:
-                        manual_in_region.append(g)
-
+        # If user manually selected genres, keep priority to those
+        if manual_genres:
+            if region_genres:
+                region_set = {g.lower() for g in region_genres}
+                manual_in_region = [g for g in manual_genres if g.lower() in region_set]
                 if manual_in_region:
                     return manual_in_region[:max_genres]
+            return manual_genres[:max_genres]
 
-            return region_genres[:max_genres]
+        # NEW: balanced round-robin across regions
+        if per_region:
+            ordered_regions = list(per_region.keys())
+            buckets = {
+                iso: [str(g).strip() for g in (per_region.get(iso) or []) if str(g).strip()]
+                for iso in ordered_regions
+            }
 
-        return manual_genres[:max_genres]
+            out: List[str] = []
+            seen = set()
+            depth = 0
+
+            while len(out) < max_genres:
+                added = False
+                for iso in ordered_regions:
+                    arr = buckets.get(iso, [])
+                    if depth < len(arr):
+                        g = arr[depth]
+                        gl = g.lower()
+                        if gl not in seen:
+                            seen.add(gl)
+                            out.append(g)
+                            added = True
+                            if len(out) >= max_genres:
+                                break
+                if not added:
+                    break
+                depth += 1
+
+            if out:
+                return out[:max_genres]
+
+        return region_genres[:max_genres]
 
 
     def _build_region_universe_indices(
@@ -953,26 +1073,43 @@ class PlaylistRecommender:
         selected_regions: Optional[List[str]] = None,
         exclude_artists: Optional[List[str]] = None,
         exclude_genres: Optional[List[str]] = None,
-        top_n_per_region: int = 120,
+        popularity_tier: str = "",
+        default_top_n: int = 50,
     ) -> np.ndarray:
-        regions = self._normalize_region_inputs(selected_regions)
+        t0_total = time.perf_counter()
+        regions = tuple(sorted(self._normalize_region_inputs(selected_regions)))
         if not regions:
             return np.arange(len(self.df), dtype=np.int64)
 
-        region_genres_all = []
+        cache_key = ("region_universe", regions, (popularity_tier or "").strip().lower(), int(default_top_n))
 
-        for iso in regions:
-            payload = get_region_payload(iso=iso, top_n=top_n_per_region)
-            if not payload.get("ok"):
-                continue
-            region_genres_all.extend(payload.get("genres", []) or [])
+        if not hasattr(self, "_region_universe_cache"):
+            self._region_universe_cache = {}
 
-        region_genres_all = list(dict.fromkeys([g for g in region_genres_all if g]))
-        if not region_genres_all:
-            return np.arange(len(self.df), dtype=np.int64)
+        if cache_key in self._region_universe_cache:
+            universe = self._region_universe_cache[cache_key].copy()
+        else:
+            region_genres_all: List[str] = []
 
-        universe = self.store.get_row_indices_by_genres(region_genres_all)
-        universe = np.asarray(universe, dtype=np.int64)
+            for iso in regions:
+                chosen = self._get_region_genres_for_universe(
+                    iso=iso,
+                    popularity_tier=popularity_tier,
+                    default_top_n=default_top_n,
+                )
+                region_genres_all.extend(chosen)
+
+            region_genres_all = list(dict.fromkeys([g for g in region_genres_all if str(g).strip()]))
+
+            if not region_genres_all:
+                universe = np.arange(len(self.df), dtype=np.int64)
+            else:
+                universe = np.asarray(
+                    self.store.get_row_indices_by_genres(region_genres_all),
+                    dtype=np.int64,
+                )
+
+            self._region_universe_cache[cache_key] = universe.copy()
 
         universe = self._apply_exclusions(
             universe,
@@ -1077,6 +1214,7 @@ class PlaylistRecommender:
         include_genres: Optional[List[str]] = None,
         exclude_artists: Optional[List[str]] = None,
         exclude_genres: Optional[List[str]] = None,
+        popularity_tier: str = "",
     ) -> np.ndarray:
         include_artists = [str(x).strip() for x in (include_artists or []) if str(x).strip()]
         include_genres = [str(x).strip() for x in (include_genres or []) if str(x).strip()]
@@ -1090,7 +1228,8 @@ class PlaylistRecommender:
                 selected_regions=selected_regions,
                 exclude_artists=exclude_artists,
                 exclude_genres=exclude_genres,
-                top_n_per_region=120,
+                popularity_tier=popularity_tier,
+                default_top_n=50,
             )
 
         if not include_artists and not include_genres:
@@ -1200,7 +1339,10 @@ class PlaylistRecommender:
                 if keep.size == 0:
                     return idx[:0]
 
-                CAP = int(min(max(400, pool_size), 2000))
+                if selected_regions:
+                    CAP = int(min(max(250, pool_size), 1000))
+                else:
+                    CAP = int(min(max(400, pool_size), 2000))
                 order = np.argsort(-pop_all[keep])
                 keep = keep[order][:CAP]
                 return keep.astype(np.int64)
@@ -1415,15 +1557,21 @@ class PlaylistRecommender:
 
         selected_regions = self._normalize_region_inputs(selected_regions)
 
-        region_top_genres, _per_region = self._get_region_genres_ranked(
+        n_regions = len(selected_regions)
+
+        top_n_per_region = 4 if n_regions >= 4 else 6
+        max_focus_genres = min(24, max(10, n_regions * top_n_per_region))
+
+        region_top_genres, per_region = self._get_region_genres_ranked(
             selected_regions,
-            top_n_per_region=10,
+            top_n_per_region=top_n_per_region,
         )
 
         focus_genres = self._resolve_popularity_focus_genres(
             region_genres=region_top_genres if selected_regions else None,
             manual_genres=manual_genres if manual_genres is not None else popularity_genres,
-            max_genres=10,
+            max_genres=max_focus_genres,
+            per_region=per_region if selected_regions else None,
         )
 
         expanded_ranges_finite = None
