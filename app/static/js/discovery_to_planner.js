@@ -74,6 +74,9 @@
       const weeks =
         parseInt(document.getElementById("planner_weeks")?.value || "2", 10) || 2;
 
+      const windowStartISO =
+        (document.getElementById("planner_window_start")?.value || "").trim();
+
       const weekdays = getSelectedWeekdaysFromHidden();
       const discovery = buildDiscoveryPayloadFromForm(form);
 
@@ -90,6 +93,7 @@
         k: 50,
         max_per_artist: 2,
         cooldown_days: 2,
+        window_start_iso: windowStartISO || null,
       };
 
       const res = await fetch("/planner/api/prepare_plan", {
@@ -127,6 +131,7 @@
             end,
             weeks,
             weekdays,
+            window_start_iso: windowStartISO || null,
           },
           discovery,
           generation: {

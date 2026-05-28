@@ -537,9 +537,8 @@
                 </select>
               </div>
 
-              <div class="row">
+              <div class="row planner-weekdays-row">
                 <label><strong>Weekdays</strong></label>
-
                 <div id="planner_weekdayToggles" class="weekday-toggles">
                   {% for wd,label in [(1,"Mon"),(2,"Tue"),(3,"Wed"),(4,"Thu"),(5,"Fri"),(6,"Sat"),(0,"Sun"), (7,"All")] %}
                     <button type="button"
@@ -549,8 +548,12 @@
                     </button>
                   {% endfor %}
                 </div>
-
                 <input type="hidden" name="planner_weekdays" id="planner_weekdays" value="1,2,3,4,5">
+              </div>
+
+              <div class="row planner-start-date-row">
+                <label><strong>Planner start date</strong></label>
+                <input type="date" id="planner_window_start">
               </div>
 
 

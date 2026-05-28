@@ -223,7 +223,7 @@
       if (!obj || typeof obj !== "object") return false;
 
       const sd = obj.startDateISO ? new Date(`${obj.startDateISO}T00:00:00`) : null;
-      startDate = sd ? getStartOfWeekMonday(sd) : null;
+      startDate = sd && !Number.isNaN(sd.getTime()) ? sd : null;
       slots = obj.slots || {};
 
       Object.keys(slots).forEach(id => {
@@ -1048,7 +1048,7 @@ async function loadCandidatesForSelectedSlot() {
   function shiftWindow(days) {
     const d = new Date(startDate);
     d.setDate(d.getDate() + days);
-    startDate = getStartOfWeekMonday(d);
+    startDate = d;
     save();
     rebuildEverything();
     renderSidebarEmpty("Changed window. Click a cell.");
@@ -1361,7 +1361,7 @@ async function loadCandidatesForSelectedSlot() {
     if (generatedStartDateISO) {
       const parsed = new Date(`${generatedStartDateISO}T00:00:00`);
       if (!Number.isNaN(parsed.getTime())) {
-        startDate = getStartOfWeekMonday(parsed);
+        startDate = parsed;
       }
     }
 

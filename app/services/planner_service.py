@@ -1138,7 +1138,7 @@ class PlannerService:
 
         if window_start_iso:
             try:
-                window_start = _monday_of(_dayiso_to_date(window_start_iso))
+                window_start = _dayiso_to_date(window_start_iso)
             except Exception:
                 window_start = _monday_of(date.today())
         else:
