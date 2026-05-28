@@ -339,6 +339,30 @@ body{
   color:#64748b;
 }
 
+
+.slot-header{
+  justify-content:space-between;
+  align-items:flex-start;
+}
+
+.slot-delete-btn{
+  flex:0 0 auto;
+  height:30px;
+  padding:0 11px;
+  border:1px solid rgba(220, 38, 38, 0.22);
+  border-radius:999px;
+  background:#fff;
+  color:#dc2626;
+  font-size:12px;
+  font-weight:900;
+  cursor:pointer;
+}
+
+.slot-delete-btn:hover{
+  background:#fee2e2;
+  border-color:#fecaca;
+}
+
 /* =========================================
    AUDIO PROFILE
    ========================================= */

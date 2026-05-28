@@ -871,6 +871,26 @@ async function loadCandidatesForSelectedSlot() {
     });
   }
 
+  function deleteSelectedSlot() {
+    const slotId = selected.slotId;
+
+    if (!slotId || !slots[slotId]) return;
+
+    const ok = confirm(`Delete slot "${slots[slotId].name}"?`);
+    if (!ok) return;
+
+    delete slots[slotId];
+
+    selected = {
+      slotId: null,
+      dayISO: null
+    };
+
+    save();
+    rebuildEverything();
+    renderSidebarEmpty("Slot deleted.");
+  }
+
 
   function getSortedSlotPlaylist(playlist) {
     const arr = Array.isArray(playlist) ? [...playlist] : [];
@@ -1026,6 +1046,33 @@ async function loadCandidatesForSelectedSlot() {
     }
   }
 
+
+  function deleteSelectedSlot() {
+    const slotId = selected.slotId;
+
+    if (!slotId || !slots[slotId]) {
+      return;
+    }
+
+    const ok = confirm(
+      `Delete slot "${slots[slotId].name}"?\n\nThis operation cannot be undone.`
+    );
+
+    if (!ok) return;
+
+    delete slots[slotId];
+
+    selected = {
+      slotId: null,
+      dayISO: null
+    };
+
+    save();
+
+    rebuildEverything();
+
+    renderSidebarEmpty("Slot deleted.");
+  }
 
   // ---------------- Slot editor events ----------------
   function onSlotEditorChange() {
@@ -1544,6 +1591,8 @@ async function loadCandidatesForSelectedSlot() {
 
   // events
   if (slotColorEdit) slotColorEdit.addEventListener("input", onSlotEditorChange);
+
+  if (btnDeleteSlot) btnDeleteSlot.addEventListener("click", deleteSelectedSlot);
 
   if (btnLoadPlan && fileLoadPlan) {
     btnLoadPlan.addEventListener("click", () => fileLoadPlan.click());
