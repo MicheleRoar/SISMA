@@ -62,11 +62,13 @@
     const { dmin, dmax } = getScale(wrap);
     const fromPct = (pct) => dmin + (pct / 100) * (dmax - dmin);
 
-    if (hMin) hMin.value = String(fromPct(a));
-    if (hMax) hMax.value = String(fromPct(b));
+    const decimals = wrap && wrap.dataset.db === "1" ? 1 : 3;
+
+    if (hMin) hMin.value = fromPct(a).toFixed(decimals);
+    if (hMax) hMax.value = fromPct(b).toFixed(decimals);
 
     // optional midpoint legacy hidden
-    if (hMid) hMid.value = String(fromPct((a + b) / 2));
+    if (hMid) hMid.value = fromPct((a + b) / 2).toFixed(decimals);
 
     // output label
     if (out) {
@@ -1633,6 +1635,7 @@ function toggleGenreUIForRegionMode() {
   const form = document.getElementById("playlist_form");
   const btnDownload = document.getElementById("btn_download_query");
   const fileLoad = document.getElementById("file_load_query"); // input type=file
+  const demoPresetLink = document.querySelector(".preset-demo-link");
   if (!form || !btnDownload || !fileLoad) return;
 
   // --- helpers ---
@@ -1659,6 +1662,56 @@ function toggleGenreUIForRegionMode() {
       max_ui: b ? Number(b.value) : null,
     };
   }
+
+
+  function formatTargetValue(name, value) {
+    if (!Number.isFinite(value)) return "";
+
+    if (name === "tempo") {
+      return value.toFixed(1);
+    }
+
+    return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  function syncAdvancedTargets() {
+    const fields = [
+      "tempo",
+      "instrumentalness",
+      "acousticness",
+      "speechiness",
+      "liveness"
+    ];
+
+    fields.forEach((name) => {
+      const minEl = document.getElementById(`${name}_min`);
+      const maxEl = document.getElementById(`${name}_max`);
+      const targetEl = document.getElementById(name);
+
+      if (!minEl || !maxEl || !targetEl) return;
+
+      const min = parseFloat(minEl.value);
+      const max = parseFloat(maxEl.value);
+
+      if (!Number.isFinite(min) && !Number.isFinite(max)) {
+        targetEl.value = "";
+        return;
+      }
+
+      let target;
+
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        target = (min + max) / 2;
+      } else if (Number.isFinite(min)) {
+        target = min;
+      } else {
+        target = max;
+      }
+
+      targetEl.value = formatTargetValue(name, target);
+    });
+  }
+
 
   function setValue(idOrName, value){
     if (value === undefined || value === null) return;
@@ -1711,6 +1764,8 @@ function toggleGenreUIForRegionMode() {
 
   // --- export ---
   function buildSettingsObject(){
+    syncAdvancedTargets();
+
     const fd = new FormData(form);
     const params = {};
     for (const [k,v] of fd.entries()) params[k] = v;
@@ -1847,6 +1902,25 @@ function toggleGenreUIForRegionMode() {
       fileLoad.value = ""; // allow re-upload same file
     }
   });
+  if (demoPresetLink) {
+    demoPresetLink.addEventListener("click", async () => {
+      try {
+        const response = await fetch("/static/presets/example.json");
+
+        if (!response.ok) {
+          throw new Error("Unable to load example preset");
+        }
+
+        const preset = await response.json();
+
+        await applySettings(preset);
+
+      } catch (err) {
+        console.error("Demo preset load failed:", err);
+      }
+    });
+  }
+  
 })();
 
 function showLoader() {

@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "created_at": "2026-05-29T22:30:01.217Z",
+  "page": "/",
+  "params": {
+    "track_id": "",
+    "preset": "Warm-up Daytime",
+    "artists": "Franco Battiato,Lucio Battisti,Fabrizio De André,Mina",
+    "artist_weights": "1,1,1,1",
+    "exclude_artists": "Gigi D'Alessio,Gigi Finizio,Gigione",
+    "genres": "italian adult pop,italian pop,classic italian pop",
+    "exclude_genres": "neapolitan funk,canzone napoletana,indie napoletano,rap napoletano",
+    "keywords": "",
+    "exclude_keywords": "",
+    "region_isos": "",
+    "dc_danceability": "0",
+    "danceability_min": "0.350",
+    "danceability_max": "0.550",
+    "danceability": "0.450",
+    "dc_energy": "0",
+    "energy_min": "0.450",
+    "energy_max": "0.650",
+    "energy": "0.550",
+    "dc_loudness": "0",
+    "loudness_min": "-16",
+    "loudness_max": "-10",
+    "loudness": "-12.9",
+    "dc_valence": "0",
+    "valence_min": "0.650",
+    "valence_max": "0.850",
+    "valence": "0.750",
+    "tempo_min": "70",
+    "tempo_max": "90",
+    "tempo": "80.0",
+    "instrumentalness_min": "",
+    "instrumentalness_max": "",
+    "instrumentalness": "",
+    "acousticness_min": "",
+    "acousticness_max": "",
+    "acousticness": "",
+    "speechiness_min": "",
+    "speechiness_max": "",
+    "speechiness": "",
+    "liveness_min": "",
+    "liveness_max": "",
+    "liveness": "",
+    "year_min": "1970",
+    "year_max": "2026",
+    "allow_explicit": "0",
+    "popularity_tier": "",
+    "planner_weekdays": "1,2,3,4,5"
+  },
+  "manual": {
+    "genres": [
+      "italian adult pop",
+      "italian pop",
+      "classic italian pop"
+    ],
+    "exclude_genres": [
+      "neapolitan funk",
+      "canzone napoletana",
+      "indie napoletano",
+      "rap napoletano"
+    ],
+    "artists": [
+      "Franco Battiato",
+      "Lucio Battisti",
+      "Fabrizio De André",
+      "Mina"
+    ],
+    "exclude_artists": [
+      "Gigi D'Alessio",
+      "Gigi Finizio",
+      "Gigione"
+    ],
+    "keywords": [],
+    "exclude_keywords": [],
+    "region_isos": []
+  },
+  "sliders": {
+    "danceability": {
+      "min_ui": 35,
+      "max_ui": 55
+    },
+    "energy": {
+      "min_ui": 45,
+      "max_ui": 65
+    },
+    "loudness": {
+      "min_ui": 68,
+      "max_ui": 77
+    },
+    "valence": {
+      "min_ui": 65,
+      "max_ui": 85
+    }
+  },
+  "ui": {
+    "enable_song_mode": false,
+    "song_query": "",
+    "song_track_id": ""
+  }
+}
