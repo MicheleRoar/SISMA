@@ -1333,3 +1333,45 @@ details.mini summary{
   flex:1 1 auto;
   min-width:0;
 }
+
+.p-block.slot-dragging {
+  opacity: 0.45;
+}
+
+.p-block.slot-drop-allowed {
+  outline: 2px dashed rgba(119, 221, 119, 0.95);
+  outline-offset: 3px;
+}
+
+.p-block.slot-drop-denied {
+  outline: 2px dashed rgba(255, 120, 120, 0.9);
+  outline-offset: 3px;
+}
+
+.p-blocks {
+  pointer-events: none;
+}
+
+.p-block {
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.p-block:active {
+  cursor: grabbing;
+}
+
+.p-cell.cell-drop-allowed {
+  position: relative;
+  outline: 2px dashed rgba(119, 221, 119, 0.9);
+  outline-offset: -4px;
+  background: rgba(119, 221, 119, 0.08);
+}
+
+.p-cell.cell-drop-denied {
+  position: relative;
+  outline: 2px dashed rgba(255, 120, 120, 0.85);
+  outline-offset: -4px;
+  background: rgba(255, 120, 120, 0.06);
+}

@@ -85,6 +85,7 @@
   window.isSlotEditMode = false;
   let candidateRows = [];
   let hideUsedCandidates = false;
+  let draggedSlotRef = null;
 
   // layers
   let cellsLayer = null;  // .p-cells
@@ -128,6 +129,132 @@
     return fmtLocalISODate(d);
   }
 
+  function getWeekdayFromCol(c) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + c);
+    return d.getDay();
+  }
+
+  function getSlotTimeKey(slot) {
+    return `${slot.start || ""}-${slot.end || ""}`;
+  }
+
+  function getCellStartTimeFromRow(r) {
+    return minToTime(timeToMin(START_DAY) + r * STEP_MIN);
+  }
+
+  function getSlotRowSpan(slot) {
+    if (!slot) return 1;
+    const a = timeToMin(slot.start);
+    const b = timeToMin(slot.end);
+    return Math.max(1, Math.round((b - a) / STEP_MIN));
+  }
+
+  function clearCellDropHints() {
+    if (!cellsLayer) return;
+    cellsLayer
+      .querySelectorAll(".cell-drop-allowed, .cell-drop-denied")
+      .forEach(cell => {
+        cell.classList.remove("cell-drop-allowed", "cell-drop-denied");
+      });
+  }
+
+  function markCellDropRange(startRow, col, rowSpan, className) {
+    if (!cellsLayer) return;
+
+    for (let rr = startRow; rr < startRow + rowSpan; rr++) {
+      const cell = cellsLayer.querySelector(
+        `.p-cell[data-r="${rr}"][data-c="${col}"]`
+      );
+
+      if (cell) cell.classList.add(className);
+    }
+  }  
+
+  function cleanSlotDayOverrides(slot) {
+    if (!slot) return;
+
+    slot.extraDays = Array.isArray(slot.extraDays) ? slot.extraDays : [];
+    slot.hiddenDays = Array.isArray(slot.hiddenDays) ? slot.hiddenDays : [];
+
+    slot.extraDays = uniq(slot.extraDays).filter(day => !slot.hiddenDays.includes(day));
+    slot.hiddenDays = uniq(slot.hiddenDays).filter(day => !slot.extraDays.includes(day));
+  }
+
+  function moveOrSwapSlotOccurrence(fromSlotId, fromCol, toCol, toSlotId = null) {
+    if (!fromSlotId || !slots[fromSlotId]) return false;
+
+    const fromSlot = slots[fromSlotId];
+    const fromDayISO = computeDayISO(fromCol);
+    const toDayISO = computeDayISO(toCol);
+
+    if (fromDayISO === toDayISO && fromSlotId === toSlotId) return false;
+
+    if (!fromSlot.playlistsByDay) fromSlot.playlistsByDay = {};
+
+    const fromPlaylist = fromSlot.playlistsByDay[fromDayISO] || [];
+
+    if (toSlotId && slots[toSlotId]) {
+      const targetSlot = slots[toSlotId];
+
+      if (getSlotTimeKey(targetSlot) !== getSlotTimeKey(fromSlot)) {
+        return false;
+      }
+
+      if (!targetSlot.playlistsByDay) targetSlot.playlistsByDay = {};
+
+      const targetPlaylist = targetSlot.playlistsByDay[toDayISO] || [];
+
+      fromSlot.playlistsByDay[fromDayISO] = targetPlaylist;
+      targetSlot.playlistsByDay[toDayISO] = fromPlaylist;
+
+      cleanSlotDayOverrides(fromSlot);
+      cleanSlotDayOverrides(targetSlot);
+
+      slots[fromSlotId] = fromSlot;
+      slots[toSlotId] = targetSlot;
+    } else {
+      fromSlot.playlistsByDay[toDayISO] = fromPlaylist;
+      fromSlot.playlistsByDay[fromDayISO] = [];
+
+
+      if (!Array.isArray(fromSlot.extraDays)) fromSlot.extraDays = [];
+      if (!Array.isArray(fromSlot.hiddenDays)) fromSlot.hiddenDays = [];
+
+      fromSlot.extraDays = fromSlot.extraDays.filter(day => day !== fromDayISO);
+      fromSlot.hiddenDays = fromSlot.hiddenDays.filter(day => day !== toDayISO);
+
+      if (!fromSlot.extraDays.includes(toDayISO)) {
+        fromSlot.extraDays.push(toDayISO);
+      }
+
+      if (!fromSlot.hiddenDays.includes(fromDayISO)) {
+        fromSlot.hiddenDays.push(fromDayISO);
+      }
+
+      cleanSlotDayOverrides(fromSlot);
+
+
+
+      slots[fromSlotId] = fromSlot;
+    }
+
+    selected = {
+      slotId: toSlotId || fromSlotId,
+      dayISO: toDayISO
+    };
+
+    save();
+    rebuildEverything();
+
+    const selectedSlot = slots[selected.slotId];
+    if (selectedSlot) {
+      applySelectedSlotToEditor(selectedSlot, selected.dayISO);
+      renderSelectedSlotPlaylist();
+    }
+
+    return true;
+  }
 
   // deterministic seed from string (fast hash)
   function hashSeed(str) {
@@ -328,11 +455,67 @@
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < COLS; c++) {
         const cell = document.createElement("div");
+
         cell.className = "p-cell";
         cell.dataset.r = String(r);
         cell.dataset.c = String(c);
+
         cell.addEventListener("click", onCellClick);
+
+        cell.addEventListener("dragover", (e) => {
+          if (!draggedSlotRef) return;
+
+          clearCellDropHints();
+
+          const targetSlotId = gridState?.[r]?.[c] || null;
+          if (targetSlotId) return;
+
+          const draggedSlot = slots[draggedSlotRef.slotId];
+          if (!draggedSlot) return;
+
+          const cellStart = getCellStartTimeFromRow(r);
+
+          if (cellStart === draggedSlot.start) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            markCellDropRange(r, c, getSlotRowSpan(draggedSlot), "cell-drop-allowed");
+          } else {
+            markCellDropRange(r, c, getSlotRowSpan(draggedSlot), "cell-drop-denied");
+          }
+
+        });
+
+        cell.addEventListener("dragleave", () => {
+          clearCellDropHints();
+        });
+
+        cell.addEventListener("drop", (e) => {
+          e.preventDefault();
+
+          clearCellDropHints();
+
+          if (!draggedSlotRef) return;
+
+          const targetSlotId = gridState?.[r]?.[c] || null;
+          if (targetSlotId) return;
+
+          const draggedSlot = slots[draggedSlotRef.slotId];
+          if (!draggedSlot) return;
+
+          const cellStart = getCellStartTimeFromRow(r);
+
+          if (cellStart !== draggedSlot.start) return;
+
+          moveOrSwapSlotOccurrence(
+            draggedSlotRef.slotId,
+            draggedSlotRef.col,
+            c,
+            null
+          );
+        });
+
         cellsLayer.appendChild(cell);
+
       }
     }
 
@@ -360,7 +543,13 @@
       const d = new Date(startDate);
       d.setDate(startDate.getDate() + c);
 
-      if (!weekdays.has(d.getDay())) continue;
+      const dayISO = computeDayISO(c);
+      const extraDays = new Set(slot.extraDays || []);
+      const hiddenDays = new Set(slot.hiddenDays || []);
+
+      if (hiddenDays.has(dayISO)) continue;
+
+      if (!weekdays.has(d.getDay()) && !extraDays.has(dayISO)) continue;
 
       for (let r = r0; r <= r1; r++) {
         if (r < 0 || r >= rows) continue;
@@ -411,6 +600,83 @@
         const block = document.createElement("div");
         block.className = "p-block";
 
+
+        const dayISO = computeDayISO(c);
+
+        block.draggable = true;
+        block.dataset.slotId = slotId;
+        block.dataset.col = String(c);
+        block.dataset.timeKey = getSlotTimeKey(slot);
+
+        block.addEventListener("dragstart", (e) => {
+          draggedSlotRef = {
+            slotId,
+            col: c,
+            timeKey: getSlotTimeKey(slot)
+          };
+
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", JSON.stringify(draggedSlotRef));
+
+          block.classList.add("slot-dragging");
+        });
+
+        block.addEventListener("dragend", () => {
+          draggedSlotRef = null;
+          block.classList.remove("slot-dragging");
+        });
+
+        block.addEventListener("dragover", (e) => {
+          if (!draggedSlotRef) return;
+
+          if (draggedSlotRef.timeKey === getSlotTimeKey(slot)) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            block.classList.add("slot-drop-allowed");
+          } else {
+            block.classList.add("slot-drop-denied");
+          }
+        });
+
+        block.addEventListener("dragleave", () => {
+          block.classList.remove("slot-drop-allowed", "slot-drop-denied");
+        });
+
+        block.addEventListener("drop", (e) => {
+          e.preventDefault();
+
+          block.classList.remove("slot-drop-allowed", "slot-drop-denied");
+
+          if (!draggedSlotRef) return;
+
+          moveOrSwapSlotOccurrence(
+            draggedSlotRef.slotId,
+            draggedSlotRef.col,
+            c,
+            slotId
+          );
+        });
+
+        block.addEventListener("click", (e) => {
+          e.stopPropagation();
+
+          selected = { slotId, dayISO };
+
+          repaintAll();
+
+          if (slotPeriod) slotPeriod.textContent = safeText(slot.name, "—");
+          if (slotTimeInfo) slotTimeInfo.textContent = `${slot.start}–${slot.end}`;
+
+          ensureTrackEnabledFlags(slot, dayISO);
+          applySelectedSlotToEditor(slot, dayISO);
+          renderSelectedSlotPlaylist();
+
+          if (window.isSlotEditMode) {
+            loadCandidatesForSelectedSlot();
+          }
+        });
+
+
         const left = c * dayW + 6; // inner padding so gridlines remain visible
         const top  = r * rowH + 2;
         const height = (r2 - r + 1) * rowH - 4;
@@ -427,7 +693,6 @@
 
         // selected highlight (by day + slot)
         if (selected.slotId === slotId && selected.dayISO) {
-          const dayISO = computeDayISO(c);
           if (dayISO === selected.dayISO) block.classList.add("is-selected");
         }
 
@@ -870,27 +1135,6 @@ async function loadCandidatesForSelectedSlot() {
       });
     });
   }
-
-  function deleteSelectedSlot() {
-    const slotId = selected.slotId;
-
-    if (!slotId || !slots[slotId]) return;
-
-    const ok = confirm(`Delete slot "${slots[slotId].name}"?`);
-    if (!ok) return;
-
-    delete slots[slotId];
-
-    selected = {
-      slotId: null,
-      dayISO: null
-    };
-
-    save();
-    rebuildEverything();
-    renderSidebarEmpty("Slot deleted.");
-  }
-
 
   function getSortedSlotPlaylist(playlist) {
     const arr = Array.isArray(playlist) ? [...playlist] : [];
