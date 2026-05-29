@@ -528,7 +528,14 @@
                 <input type="time" id="planner_end" value="11:00">
               </div>
 
-              <div class="row">
+
+              <div class="row planner-start-date-row">
+                <label><strong>Planner start date</strong></label>
+                <input type="date" id="planner_window_start">
+              </div>
+
+
+              <div class="row planner-weeks-row">
                 <label><strong>Weeks</strong></label>
                 <select id="planner_weeks">
                   {% for w in range(1,9) %}
@@ -536,6 +543,17 @@
                   {% endfor %}
                 </select>
               </div>
+
+              <div class="row planner-track-order-row">
+                <label><strong>Track order</strong></label>
+                <select id="planner_track_order">
+                  <option value="default" selected>Default</option>
+                  <option value="tempo_asc">BPM ↑</option>
+                  <option value="tempo_desc">BPM ↓</option>
+                </select>
+              </div>
+
+
 
               <div class="row planner-weekdays-row">
                 <label><strong>Weekdays</strong></label>
@@ -549,11 +567,6 @@
                   {% endfor %}
                 </div>
                 <input type="hidden" name="planner_weekdays" id="planner_weekdays" value="1,2,3,4,5">
-              </div>
-
-              <div class="row planner-start-date-row">
-                <label><strong>Planner start date</strong></label>
-                <input type="date" id="planner_window_start">
               </div>
 
 
