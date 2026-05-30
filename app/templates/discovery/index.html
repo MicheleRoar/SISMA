@@ -56,20 +56,42 @@
           <label for="preset"><strong>Preset</strong></label>
 
           <div class="inline-actions">
+
             <select id="preset" name="preset">
-              <option value="" {% if not defaults.get("preset") %}selected{% endif %}>Custom</option>
+              <option value="" {% if not defaults.get("preset") %}selected{% endif %}>
+                Custom
+              </option>
+
               {% for p in presets %}
-                <option value="{{ p }}" {% if defaults.get("preset") == p %}selected{% endif %}>
+                <option value="{{ p }}"
+                        {% if defaults.get("preset") == p %}selected{% endif %}>
                   {{ p }}
                 </option>
               {% endfor %}
             </select>
 
-            <!-- Load preset (settings file) -->
-            <label class="btn secondary file-btn" for="file_load_query" title="Load settings from JSON">
-              Load preset
-            </label>
-            <input type="file" id="file_load_query" accept="application/json" class="file-input-hidden">
+            <div class="preset-load-wrapper">
+
+              <label
+                class="btn secondary file-btn"
+                for="file_load_query"
+                title="Load settings from JSON">
+                Load preset
+              </label>
+
+              <div class="preset-demo-link">
+                Try an example
+              </div>
+
+              <input
+                type="file"
+                id="file_load_query"
+                accept="application/json"
+                class="file-input-hidden"
+              >
+
+            </div>
+
           </div>
         </div>
 

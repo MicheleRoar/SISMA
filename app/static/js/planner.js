@@ -72,6 +72,7 @@
   const btnHideUsedTracks = document.getElementById("btnHideUsedTracks");
 
   const btnDownloadTimetable = document.getElementById("btnDownloadTimetable");
+  const btnExportPlanning = document.getElementById("btnExportPlanning");
 
   const debugBox = document.getElementById("debugBox");
 
@@ -1430,6 +1431,67 @@ async function loadCandidatesForSelectedSlot() {
   }
 
 
+  function csvEscape(value) {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    return `"${str.replaceAll('"', '""')}"`;
+  }
+
+  function downloadTextFile(filename, content, mimeType = "text/csv;charset=utf-8") {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportPlanningCsv() {
+    const raw = localStorage.getItem("sisma_planner_spotify_export");
+
+    if (!raw) {
+      window.alert("No Spotify planning export found. Send the planner to Spotify first.");
+      return;
+    }
+
+    let created = [];
+
+    try {
+      created = JSON.parse(raw);
+    } catch {
+      window.alert("Spotify planning export is corrupted. Send the planner to Spotify again.");
+      return;
+    }
+
+    if (!Array.isArray(created) || !created.length) {
+      window.alert("No Spotify playlists found to export.");
+      return;
+    }
+
+    const header = ["Nome", "Link Spotify", "Descrizione", "Orario", "Giorni"];
+
+    const rows = created.map(item => [
+      item.spotify_name || item.name || item.slotName || "",
+      item.spotify_url || "",
+      item.description || "",
+      item.start || "",
+      item.weekdayLabel || ""
+    ].map(csvEscape).join(","));
+
+    const csv = [
+      header.map(csvEscape).join(","),
+      ...rows
+    ].join("\n");
+
+    downloadTextFile(`sisma_planning_spotify_${fmtLocalISODate(startDate)}.csv`, csv);
+  }
+
+
   function findConflictingSlotIds(candidateSlot, candidateSlotId = null) {
     const conflicts = new Set();
     const cells = computeCoverageCellsForSlot(candidateSlot);
@@ -1852,6 +1914,11 @@ async function loadCandidatesForSelectedSlot() {
 
   if (btnDownloadTimetable) btnDownloadTimetable.addEventListener("click", exportTimetableJSON);
   // if (btnCommitSpotify) btnCommitSpotify.addEventListener("click", commitSpotifyStub);
+
+  if (btnExportPlanning) {
+    btnExportPlanning.disabled = false;
+    btnExportPlanning.addEventListener("click", exportPlanningCsv);
+  }
 
   if (btnClearPlan) btnClearPlan.addEventListener("click", clearAll);
   if (btnPrevWindow) btnPrevWindow.addEventListener("click", () => shiftWindow(-14));

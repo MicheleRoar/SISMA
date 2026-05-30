@@ -455,8 +455,22 @@
       msg(`Creating ${i + 1}/${entries.length}: ${name}`);
 
       const out = await createSpotifyPlaylistNamed(name, entry.trackIds, description);
-      created.push(out);
+
+      created.push({
+        ...entry,
+        name,
+        description,
+        spotify_id: out.id,
+        spotify_url: out.url,
+        spotify_name: out.name
+      });
+
     }
+
+    localStorage.setItem(
+      "sisma_planner_spotify_export",
+      JSON.stringify(created)
+    );
 
     const html = [
       `<div><strong>${created.length}</strong> playlist create.</div>`,

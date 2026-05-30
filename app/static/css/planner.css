@@ -1375,3 +1375,20 @@ details.mini summary{
   outline-offset: -4px;
   background: rgba(255, 120, 120, 0.06);
 }
+
+.publish-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.publish-actions-grid .btn {
+  width: 100%;
+  min-height: 58px;
+}
+
+@media (max-width: 640px) {
+  .publish-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
