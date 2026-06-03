@@ -82,7 +82,7 @@
   let gridState = [];   // [rows][COLS] -> slotId|null
   let slots = {};       // slotId -> slot
   let selected = { slotId: null, dayISO: null };
-  let slotPlaylistSortMode = "bpm_asc"; // bpm_asc | bpm_desc | random
+  const SLOT_PLAYLIST_SORT_DEFAULT = "bpm_asc"; // bpm_asc | bpm_desc | random
   window.isSlotEditMode = false;
   let candidateRows = [];
   let hideUsedCandidates = false;
@@ -290,6 +290,61 @@
     return playlist.filter(t => t.enabled !== false);
   }
 
+  function ensurePlaylistSortByDay(slot) {
+    if (!slot) return {};
+
+    if (
+      !slot.playlistSortByDay ||
+      typeof slot.playlistSortByDay !== "object" ||
+      Array.isArray(slot.playlistSortByDay)
+    ) {
+      slot.playlistSortByDay = {};
+    }
+
+    return slot.playlistSortByDay;
+  }
+
+  function normalizePlaylistSortMode(mode) {
+    if (mode === "bpm_asc" || mode === "bpm_desc" || mode === "random") {
+      return mode;
+    }
+
+    return SLOT_PLAYLIST_SORT_DEFAULT;
+  }
+
+  function getPlaylistSortMode(slot, dayISO) {
+    if (!slot || !dayISO) return SLOT_PLAYLIST_SORT_DEFAULT;
+
+    const byDay = ensurePlaylistSortByDay(slot);
+    return normalizePlaylistSortMode(byDay[dayISO]);
+  }
+
+  function setPlaylistSortMode(slot, dayISO, mode) {
+    if (!slot || !dayISO) return;
+
+    const byDay = ensurePlaylistSortByDay(slot);
+    byDay[dayISO] = normalizePlaylistSortMode(mode);
+  }
+
+  function getNextPlaylistSortMode(mode) {
+    const current = normalizePlaylistSortMode(mode);
+
+    if (current === "bpm_asc") return "bpm_desc";
+    if (current === "bpm_desc") return "random";
+    return "bpm_asc";
+  }
+
+  function getSelectedPlaylistSortMode() {
+    const slotId = selected?.slotId || null;
+    const dayISO = selected?.dayISO || null;
+
+    if (!slotId || !dayISO || !slots[slotId]) {
+      return SLOT_PLAYLIST_SORT_DEFAULT;
+    }
+
+    return getPlaylistSortMode(slots[slotId], dayISO);
+  }
+
 
   function uniq(arr) {
     const out = [];
@@ -359,6 +414,7 @@
         if (!s) return;
         s.id = s.id || id;
         if (!s.playlistsByDay) s.playlistsByDay = {};
+        ensurePlaylistSortByDay(s);
         if (!s.weekdays) s.weekdays = [1,2,3,4,5];
         if (!s.discovery) s.discovery = {};
         if (s.k == null) s.k = DEFAULT_K;
@@ -1137,10 +1193,11 @@ async function loadCandidatesForSelectedSlot() {
     });
   }
 
-  function getSortedSlotPlaylist(playlist) {
+  function getSortedSlotPlaylist(playlist, sortMode = SLOT_PLAYLIST_SORT_DEFAULT) {
     const arr = Array.isArray(playlist) ? [...playlist] : [];
+    const mode = normalizePlaylistSortMode(sortMode);
 
-    if (slotPlaylistSortMode === "random") {
+    if (mode === "random") {
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -1155,7 +1212,7 @@ async function loadCandidatesForSelectedSlot() {
 
     arr.sort((a, b) => bpmValue(a) - bpmValue(b));
 
-    if (slotPlaylistSortMode === "bpm_desc") {
+    if (mode === "bpm_desc") {
       arr.reverse();
     }
 
@@ -1165,13 +1222,15 @@ async function loadCandidatesForSelectedSlot() {
   function updateSlotSortIndicator() {
     if (!slotSortIndicator) return;
 
-    if (slotPlaylistSortMode === "bpm_asc") {
+    const mode = getSelectedPlaylistSortMode();
+
+    if (mode === "bpm_asc") {
       slotSortIndicator.textContent = "▲";
       slotSortIndicator.title = "BPM ascending";
       return;
     }
 
-    if (slotPlaylistSortMode === "bpm_desc") {
+    if (mode === "bpm_desc") {
       slotSortIndicator.textContent = "▼";
       slotSortIndicator.title = "BPM descending";
       return;
@@ -1179,8 +1238,7 @@ async function loadCandidatesForSelectedSlot() {
 
     slotSortIndicator.textContent = "•";
     slotSortIndicator.title = "Random order";
-  }  
-
+  }
 
 
   function renderSelectedSlotPlaylist() {
@@ -1191,12 +1249,16 @@ async function loadCandidatesForSelectedSlot() {
       if (slotPlaylistList) {
         slotPlaylistList.innerHTML = `<div class="hint">—</div>`;
       }
+      updateSlotSortIndicator();
       return;
     }
 
     const slot = slots[slotId];
     const playlist = ensureTrackEnabledFlags(slot, dayISO);
-    const sortedPlaylist = getSortedSlotPlaylist(playlist);
+    const sortMode = getPlaylistSortMode(slot, dayISO);
+    const sortedPlaylist = getSortedSlotPlaylist(playlist, sortMode);
+
+    updateSlotSortIndicator();
 
     if (!playlist.length) {
       if (slotPlaylistList) {
@@ -1855,14 +1917,18 @@ async function loadCandidatesForSelectedSlot() {
     updateSlotSortIndicator();
 
     btnSortSlotPlaylist.addEventListener("click", () => {
-      if (slotPlaylistSortMode === "bpm_asc") {
-        slotPlaylistSortMode = "bpm_desc";
-      } else if (slotPlaylistSortMode === "bpm_desc") {
-        slotPlaylistSortMode = "random";
-      } else {
-        slotPlaylistSortMode = "bpm_asc";
-      }
+      const slotId = selected?.slotId || null;
+      const dayISO = selected?.dayISO || null;
 
+      if (!slotId || !dayISO || !slots[slotId]) return;
+
+      const slot = slots[slotId];
+      const currentMode = getPlaylistSortMode(slot, dayISO);
+      const nextMode = getNextPlaylistSortMode(currentMode);
+
+      setPlaylistSortMode(slot, dayISO, nextMode);
+
+      save();
       updateSlotSortIndicator();
       renderSelectedSlotPlaylist();
     });
