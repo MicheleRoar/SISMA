@@ -306,7 +306,21 @@
 
   async function onAddToSpotify() {
     msg("Creating playlist on Spotify…");
-    const trackIds = await getGeneratedTracksFromCurrentForm();
+
+    // IMPORTANT:
+    // Use the tracks currently displayed/checked in the table.
+    // Do NOT call /generate again, otherwise the playlist may be regenerated
+    // and Spotify will receive different songs from the ones shown on screen.
+    let trackIds = getSelectedTrackIdsFromTable();
+
+    // Fallback only if the table is not available for some reason.
+    if (!trackIds.length) {
+      trackIds = await getGeneratedTracksFromCurrentForm();
+    }
+
+    if (!trackIds.length) {
+      throw new Error("No selected tracks found.");
+    }
 
     const input = document.getElementById("spotify_playlist_name");
     const customName = String(input?.value || "").trim();
