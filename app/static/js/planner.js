@@ -257,6 +257,40 @@
     return true;
   }
 
+  // Moves a slot to a different time band: changes start/end for the whole
+  // slot (all its day/week occurrences keep their day, just at a new time).
+  function changeSlotTimeForSlot(slotId, newStart, newEnd) {
+    const slot = slots[slotId];
+    if (!slot) return false;
+    if (slot.start === newStart && slot.end === newEnd) return false;
+
+    const candidate = { ...slot, start: newStart, end: newEnd };
+    const conflictIds = findConflictingSlotIds(candidate, slotId);
+
+    if (conflictIds.length) {
+      const ok = confirmOverwriteConflicts(conflictIds);
+      if (!ok) return false;
+      conflictIds.forEach((id) => { delete slots[id]; });
+    }
+
+    slot.start = newStart;
+    slot.end = newEnd;
+    slots[slotId] = slot;
+
+    save();
+    rebuildEverything();
+
+    selected = { slotId, dayISO: selected.dayISO };
+
+    const selectedSlot = slots[selected.slotId];
+    if (selectedSlot) {
+      applySelectedSlotToEditor(selectedSlot, selected.dayISO);
+      renderSelectedSlotPlaylist();
+    }
+
+    return true;
+  }
+
   // deterministic seed from string (fast hash)
   function hashSeed(str) {
     let h = 2166136261;
@@ -531,8 +565,12 @@
           if (!draggedSlot) return;
 
           const cellStart = getCellStartTimeFromRow(r);
+          const sameColumn = (c === draggedSlotRef.col);
+          const sameStart = (cellStart === draggedSlot.start);
 
-          if (cellStart === draggedSlot.start) {
+          // Same column, different time band -> retime the whole slot.
+          // Same start time, different column -> swap day occurrence (existing).
+          if (sameColumn || sameStart) {
             e.preventDefault();
             e.dataTransfer.dropEffect = "move";
             markCellDropRange(r, c, getSlotRowSpan(draggedSlot), "cell-drop-allowed");
@@ -560,15 +598,29 @@
           if (!draggedSlot) return;
 
           const cellStart = getCellStartTimeFromRow(r);
+          const sameColumn = (c === draggedSlotRef.col);
+          const sameStart = (cellStart === draggedSlot.start);
 
-          if (cellStart !== draggedSlot.start) return;
+          if (sameColumn && !sameStart) {
+            // Dragged vertically within the same day: change the slot's
+            // start/end (all its occurrences move to the new time band).
+            const durationMin = timeToMin(draggedSlot.end) - timeToMin(draggedSlot.start);
+            const newStartMin = timeToMin(cellStart);
+            const newEndMin = newStartMin + durationMin;
+            if (newEndMin > timeToMin(END_DAY)) return;
 
-          moveOrSwapSlotOccurrence(
-            draggedSlotRef.slotId,
-            draggedSlotRef.col,
-            c,
-            null
-          );
+            changeSlotTimeForSlot(draggedSlotRef.slotId, cellStart, minToTime(newEndMin));
+            return;
+          }
+
+          if (sameStart) {
+            moveOrSwapSlotOccurrence(
+              draggedSlotRef.slotId,
+              draggedSlotRef.col,
+              c,
+              null
+            );
+          }
         });
 
         cellsLayer.appendChild(cell);
