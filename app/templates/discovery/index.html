@@ -560,7 +560,9 @@
               <div class="row planner-weeks-row">
                 <label><strong>Weeks</strong></label>
                 <select id="planner_weeks">
-                  {% for w in range(1,9) %}
+                  {# Planner grid shows 4 weeks (COLS=28 in planner.js) - occurrences beyond
+                     that would silently never render, so this can't offer more than 4. #}
+                  {% for w in range(1,5) %}
                     <option value="{{ w }}" {% if w == 2 %}selected{% endif %}>{{ w }}</option>
                   {% endfor %}
                 </select>

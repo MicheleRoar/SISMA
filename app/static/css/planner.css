@@ -843,8 +843,8 @@ details.mini summary{
 .cal-days-head{
   height:var(--head-h);
   display:grid;
-  grid-template-columns:repeat(14, var(--day-col-w));
-  min-width:calc(14 * var(--day-col-w));
+  grid-template-columns:repeat(28, var(--day-col-w));
+  min-width:calc(28 * var(--day-col-w));
 }
 
 .cal-day-head{
@@ -895,14 +895,14 @@ details.mini summary{
 
 .cal-grid-wrap{
   position:relative;
-  width:calc(14 * var(--day-col-w));
+  width:calc(28 * var(--day-col-w));
   min-height:100%;
 }
 
 .p-cells{
   display:grid;
-  grid-template-columns:repeat(14, var(--day-col-w));
-  width:calc(14 * var(--day-col-w));
+  grid-template-columns:repeat(28, var(--day-col-w));
+  width:calc(28 * var(--day-col-w));
 }
 
 .p-cell{

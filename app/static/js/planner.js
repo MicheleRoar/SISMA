@@ -11,7 +11,7 @@
   const START_DAY = "10:00";
   const END_DAY   = "24:00";
   const STEP_MIN  = 30;
-  const COLS = 14;
+  const COLS = 28; // 4 weeks visible (must match the "Weeks" dropdown cap and planner.css grid sizing)
   const LS_PLAN_KEY = "sisma_planner_plan_v1";
 
   const DEFAULT_K = 50;
@@ -2039,8 +2039,8 @@ async function loadCandidatesForSelectedSlot() {
   }
 
   if (btnClearPlan) btnClearPlan.addEventListener("click", clearAll);
-  if (btnPrevWindow) btnPrevWindow.addEventListener("click", () => shiftWindow(-14));
-  if (btnNextWindow) btnNextWindow.addEventListener("click", () => shiftWindow(+14));
+  if (btnPrevWindow) btnPrevWindow.addEventListener("click", () => shiftWindow(-7));
+  if (btnNextWindow) btnNextWindow.addEventListener("click", () => shiftWindow(+7));
 
   [
     candidateSearch,
