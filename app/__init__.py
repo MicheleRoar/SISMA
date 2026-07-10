@@ -21,10 +21,12 @@ def create_app():
     from app.blueprints.discovery import bp as discovery_bp
     from app.blueprints.spotify import bp as spotify_bp
     from app.blueprints.planner import bp as planner_bp
+    from app.blueprints.extender import bp as extender_bp
 
     app.register_blueprint(discovery_bp)
     app.register_blueprint(spotify_bp)
     app.register_blueprint(planner_bp)
+    app.register_blueprint(extender_bp)
 
     # -------------------------
     # Core services (singletons)

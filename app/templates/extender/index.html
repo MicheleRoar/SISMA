@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="it" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SISMA — Extender</title>
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/extender.css') }}">
+</head>
+
+<body>
+  <div class="wrap">
+
+    <header class="planner-header">
+      <div class="brand">
+        <div class="logo">SISMA</div>
+        <div class="subtitle">Extender</div>
+      </div>
+
+      <nav class="tabs">
+        <a class="tab" href="{{ url_for('discovery.index') }}">Discovery</a>
+        <a class="tab" href="{{ url_for('planner.index') }}">Planner</a>
+        <a class="tab active" href="{{ url_for('extender.index') }}">Extender</a>
+      </nav>
+    </header>
+
+    <main class="extender-workspace">
+
+      <section class="card extender-token-card">
+        <h2>Estendi il dataset da Spotify</h2>
+        <p class="extender-hint">
+          Incolla un token Spotify (Bearer) ottenuto manualmente. Verranno lette le tue playlist,
+          confrontate con il dataset esistente, e mostrate solo le tracce/artisti nuovi da rivedere
+          prima di aggiungerli.
+        </p>
+
+        <div class="row extender-token-row">
+          <input type="password" id="extenderToken" placeholder="Incolla qui il token Bearer" autocomplete="off" />
+          <button class="btn" id="btnExtenderFetch" type="button">Fetch</button>
+        </div>
+
+        <div class="extender-options-row">
+          <label class="extender-option">
+            <input type="checkbox" id="extenderIncludeAllPlaylists" />
+            Includi anche playlist che segui (non solo le tue)
+          </label>
+        </div>
+
+        <div id="extenderFetchStatus" class="extender-status"></div>
+        <div id="extenderSummary" class="extender-summary is-hidden"></div>
+      </section>
+
+      <section class="card extender-results-card is-hidden" id="extenderResults">
+
+        <div class="extender-table-block">
+          <div class="extender-table-head">
+            <h3>Nuove tracce (<span id="extenderTracksCount">0</span>)</h3>
+            <div class="extender-select-actions">
+              <button class="link" type="button" data-select="tracks" data-mode="all">Seleziona tutte</button>
+              <button class="link" type="button" data-select="tracks" data-mode="none">Deseleziona tutte</button>
+            </div>
+          </div>
+          <div class="extender-table-wrap">
+            <table class="extender-table">
+              <thead>
+                <tr>
+                  <th class="col-check"><input type="checkbox" id="extenderTracksSelectAll" /></th>
+                  <th>Titolo</th>
+                  <th>Artisti</th>
+                  <th>Uscita</th>
+                  <th>Popolarità</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody id="extenderTracksBody">
+                <tr class="extender-empty-row"><td colspan="6">Nessun dato ancora — premi Fetch.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="extender-table-block">
+          <div class="extender-table-head">
+            <h3>Nuovi artisti (<span id="extenderArtistsCount">0</span>)</h3>
+            <div class="extender-select-actions">
+              <button class="link" type="button" data-select="artists" data-mode="all">Seleziona tutti</button>
+              <button class="link" type="button" data-select="artists" data-mode="none">Deseleziona tutti</button>
+            </div>
+          </div>
+          <div class="extender-table-wrap">
+            <table class="extender-table">
+              <thead>
+                <tr>
+                  <th class="col-check"><input type="checkbox" id="extenderArtistsSelectAll" /></th>
+                  <th>Nome</th>
+                  <th>Generi</th>
+                  <th>Popolarità</th>
+                  <th>Follower</th>
+                </tr>
+              </thead>
+              <tbody id="extenderArtistsBody">
+                <tr class="extender-empty-row"><td colspan="5">Nessun dato ancora — premi Fetch.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="extender-apply-row">
+          <button class="btn" id="btnExtenderApply" type="button" disabled>Applica selezionati al dataset</button>
+          <div id="extenderApplyStatus" class="extender-status"></div>
+        </div>
+
+      </section>
+
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/extender.js') }}"></script>
+</body>
+</html>
